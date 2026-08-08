@@ -7,7 +7,7 @@
 // Anthropic's Messages API uses, so callClaude() in App.jsx needs no
 // changes: { content: [{ type: "text", text: "..." }] }.
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 const GEMINI_URL = (model, key) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
 const ALLOWED_MODEL = "claude-sonnet-4-6"; // the model name App.jsx still sends; unused beyond validation
