@@ -1,10 +1,16 @@
-// Vercel serverless function: proxies Claude API calls so the Anthropic
-// API key never reaches the browser. See src/App.jsx's callClaude(), which
-// is the single point in the frontend that hits this endpoint.
+// Vercel serverless function: proxies AI calls so the API key never
+// reaches the browser. See src/App.jsx's callClaude(), which is the single
+// point in the frontend that hits this endpoint.
+//
+// Internally this calls Google's Gemini API (free tier) rather than
+// Anthropic's, but translates the request/response to the same shape
+// Anthropic's Messages API uses, so callClaude() in App.jsx needs no
+// changes: { content: [{ type: "text", text: "..." }] }.
 
-const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-const ANTHROPIC_VERSION = "2023-06-01";
-const ALLOWED_MODEL = "claude-sonnet-4-6";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_URL = (model, key) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+const ALLOWED_MODEL = "claude-sonnet-4-6"; // the model name App.jsx still sends; unused beyond validation
 const MAX_TOKENS_CAP = 1000;
 const MAX_MESSAGES = 40;
 const MAX_MESSAGE_CHARS = 8000;
@@ -63,6 +69,23 @@ function validateBody(body) {
   return null;
 }
 
+// Anthropic uses role "user"/"assistant"; Gemini uses "user"/"model", and
+// wraps text in a "parts" array instead of a plain string.
+function toGeminiContents(messages) {
+  return messages.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }],
+  }));
+}
+
+// Reshape Gemini's response into the { content: [{ type, text }] } shape
+// App.jsx's callClaude() already expects from Anthropic's API.
+function toAnthropicShape(geminiData) {
+  const parts = geminiData?.candidates?.[0]?.content?.parts || [];
+  const text = parts.map((p) => p.text || "").join("");
+  return { content: [{ type: "text", text }] };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -83,28 +106,28 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: validationError });
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return res.status(500).json({ error: "Server is missing ANTHROPIC_API_KEY" });
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(500).json({ error: "Server is missing GEMINI_API_KEY" });
   }
 
   try {
-    const response = await fetch(ANTHROPIC_URL, {
+    const response = await fetch(GEMINI_URL(GEMINI_MODEL, process.env.GEMINI_API_KEY), {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
-        "anthropic-version": ANTHROPIC_VERSION,
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: req.body.model,
-        max_tokens: Math.min(req.body.max_tokens || MAX_TOKENS_CAP, MAX_TOKENS_CAP),
-        system: req.body.system,
-        messages: req.body.messages,
+        contents: toGeminiContents(req.body.messages),
+        systemInstruction: { parts: [{ text: req.body.system }] },
+        generationConfig: {
+          maxOutputTokens: Math.min(req.body.max_tokens || MAX_TOKENS_CAP, MAX_TOKENS_CAP),
+        },
       }),
     });
 
     const data = await response.json();
-    return res.status(response.status).json(data);
+    if (!response.ok) {
+      return res.status(response.status).json({ error: data?.error?.message || "Upstream error" });
+    }
+    return res.status(200).json(toAnthropicShape(data));
   } catch (err) {
     return res.status(502).json({ error: "Upstream request failed" });
   }

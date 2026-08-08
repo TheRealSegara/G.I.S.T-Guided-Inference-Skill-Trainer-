@@ -8,7 +8,9 @@ Built for the Petrosains AI Educator Challenge 2026.
 
 ## AI calls run through a server-side proxy
 
-Every AI feature in this app, coaching dialogue, the diagnostic report, the level maker, the comprehension question, calls a single function, `callClaude()` in `src/App.jsx`, which posts to `/api/claude`. That endpoint is a Vercel serverless function (`api/claude.js`) that holds the real Anthropic API key server-side and forwards the request to `https://api.anthropic.com/v1/messages`. The key is never sent to the browser.
+Every AI feature in this app, coaching dialogue, the diagnostic report, the level maker, the comprehension question, calls a single function, `callClaude()` in `src/App.jsx`, which posts to `/api/claude`. That endpoint is a Vercel serverless function (`api/claude.js`) that holds a real API key server-side and forwards the request to the upstream model. The key is never sent to the browser.
+
+The proxy currently calls **Google's Gemini API** (free tier, no credit card required), not Anthropic, chosen to avoid billing during early testing. It translates Gemini's request/response shape internally so `App.jsx` doesn't need to know or care which provider is behind `/api/claude`, that's still the one function every AI feature goes through, same as before. Swapping providers again later (e.g. to Anthropic once budget allows) only means rewriting `api/claude.js`, not the frontend.
 
 The proxy also applies some basic protections before forwarding a request:
 
@@ -31,7 +33,7 @@ If you deploy this outside Vercel, reimplement `api/claude.js`'s logic as whatev
 
 ## Getting started
 
-1. Copy `.env.example` to `.env.local` and set `ANTHROPIC_API_KEY` (and `ALLOWED_ORIGINS` once you have a deployed URL).
+1. Copy `.env.example` to `.env.local` and set `GEMINI_API_KEY` (get one free at aistudio.google.com/apikey) and `ALLOWED_ORIGINS` once you have a deployed URL.
 2. Install dependencies and run with the Vercel CLI so the `/api` function is served alongside the frontend:
 
 ```bash
@@ -45,7 +47,7 @@ Running `vite` directly (`npm run dev`) serves the frontend only; `/api/claude` 
 ## Deploying to Vercel
 
 1. Import the repo into a new Vercel project (framework preset: Vite).
-2. In the project's Environment Variables, set `ANTHROPIC_API_KEY` (your real key) and `ALLOWED_ORIGINS` (your deployed domain, e.g. `https://your-app.vercel.app`).
+2. In the project's Environment Variables, set `GEMINI_API_KEY` (your free key from aistudio.google.com/apikey) and `ALLOWED_ORIGINS` (your deployed domain, e.g. `https://your-app.vercel.app`).
 3. Deploy. Vercel builds the frontend (`npm run build` → `dist/`) and picks up `api/claude.js` as a serverless function automatically.
 
 ## Project structure
