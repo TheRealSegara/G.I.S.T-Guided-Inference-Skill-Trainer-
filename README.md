@@ -20,7 +20,7 @@ The proxy also applies some basic protections before forwarding a request:
 - **`max_tokens` cap**: forwarded requests are capped regardless of what the client sends.
 - **Best-effort rate limiting**: a per-instance in-memory limiter (20 requests/minute/IP). Since serverless instances are short-lived and not shared, this isn't a global guarantee, it deters casual abuse of a warm instance, not a determined attacker.
 
-If you deploy this outside Vercel, reimplement `api/claude.js`'s logic as whatever server-side endpoint your host supports; the frontend only needs `/api/claude` to exist and behave the same way.
+The proxy logic itself lives in `api/_claudeHandler.js`, shared between two entry points depending on how you deploy (see below): `api/claude.js` (a Vercel serverless function) and `server.js` (a plain Node/Express server for container-based hosts).
 
 ## Tech stack
 
@@ -28,7 +28,7 @@ If you deploy this outside Vercel, reimplement `api/claude.js`'s logic as whatev
 - Tailwind CSS
 - lucide-react (icons)
 - Browser's native `SpeechSynthesis` API for text-to-speech (no external dependency)
-- Vercel serverless function for the Anthropic API proxy (`api/claude.js`)
+- Vercel serverless function or Express server for the Gemini API proxy (`api/claude.js` / `server.js`)
 - No database, no login — sessions are entirely in-memory and reset on reload by design (see [Architecture notes](#architecture-notes) below)
 
 ## Getting started
@@ -50,11 +50,21 @@ Running `vite` directly (`npm run dev`) serves the frontend only; `/api/claude` 
 2. In the project's Environment Variables, set `GEMINI_API_KEY` (your free key from aistudio.google.com/apikey) and `ALLOWED_ORIGINS` (your deployed domain, e.g. `https://your-app.vercel.app`).
 3. Deploy. Vercel builds the frontend (`npm run build` → `dist/`) and picks up `api/claude.js` as a serverless function automatically.
 
+## Deploying to a container host (e.g. Google AI Studio / Cloud Run)
+
+Container-based hosts don't run per-file serverless functions the way Vercel does, they expect a single process that starts and listens on `process.env.PORT`. `server.js` is that process: it serves the built frontend and handles `/api/claude` itself via Express.
+
+1. Set `GEMINI_API_KEY` and `ALLOWED_ORIGINS` as environment variables/secrets in the host's project settings (in Google AI Studio's case, this may already be wired up automatically from your Google account, since it issues the free key itself).
+2. The host should run `npm install`, then `npm run build` (or the `gcp-build` script, which does the same thing, some GCP buildpacks run this automatically), then `npm start` (`node server.js`). If the host lets you set a build/start command explicitly, use those.
+3. If a deploy fails with something like "container failed to start and listen on the port", it means the host isn't running `npm start`, double check the build/start command configuration rather than the app code.
+
 ## Project structure
 
 ```
 ├── api/
-│   └── claude.js     # Serverless proxy to the Anthropic API (holds the real key)
+│   ├── claude.js            # Vercel serverless function entry point
+│   └── _claudeHandler.js    # The actual proxy logic (Gemini call + protections), shared with server.js
+├── server.js                 # Node/Express server for container-based hosts (Cloud Run, etc.)
 ├── index.html
 ├── src/
 │   ├── main.jsx      # React entry point
