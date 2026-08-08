@@ -9,6 +9,8 @@
 // Anthropic's Messages API uses, so callClaude() in App.jsx needs no
 // changes: { content: [{ type: "text", text: "..." }] }.
 
+import { verifyToken } from "./_auth.js";
+
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 const GEMINI_URL = (model, key) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
@@ -20,10 +22,18 @@ const MAX_SYSTEM_CHARS = 12000;
 
 // Best-effort per-instance rate limit. Serverless instances are short-lived
 // and not shared, so this doesn't guarantee a global cap, but it stops a
-// single abusive client from hammering a warm instance.
+// single abusive client from hammering a warm instance. Vercel's Firewall
+// rate-limit rule (configured in the dashboard, see README) is the real
+// global backstop; this is a second, cheaper layer.
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 20;
 const requestLog = new Map();
+
+// Per-access-code daily quota, keyed by the label embedded in the token
+// (see _authHandler.js / ACCESS_CODES), not by IP. Same best-effort,
+// per-instance caveat as the rate limiter above.
+const DAILY_QUOTA_PER_CODE = Number(process.env.DAILY_QUOTA_PER_CODE) || 300;
+const quotaLog = new Map();
 
 function getAllowedOrigins() {
   return (process.env.ALLOWED_ORIGINS || "")
@@ -55,6 +65,17 @@ function isRateLimited(ip) {
   }
   entry.count += 1;
   return entry.count > RATE_LIMIT_MAX_REQUESTS;
+}
+
+function isOverDailyQuota(label) {
+  const day = new Date().toISOString().slice(0, 10);
+  const entry = quotaLog.get(label);
+  if (!entry || entry.day !== day) {
+    quotaLog.set(label, { day, count: 1 });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > DAILY_QUOTA_PER_CODE;
 }
 
 function validateBody(body) {
@@ -101,6 +122,17 @@ export default async function claudeHandler(req, res) {
   const ip = getClientIp(req);
   if (isRateLimited(ip)) {
     return res.status(429).json({ error: "Too many requests, please slow down" });
+  }
+
+  const authHeader = req.headers["authorization"] || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  const claims = verifyToken(token, process.env.AUTH_SECRET);
+  if (!claims) {
+    return res.status(401).json({ error: "Missing or expired access token" });
+  }
+
+  if (isOverDailyQuota(claims.label)) {
+    return res.status(429).json({ error: "Daily quota reached for this access code, please try again tomorrow" });
   }
 
   const validationError = validateBody(req.body);

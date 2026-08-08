@@ -624,11 +624,53 @@ Respond with ONLY valid JSON, no markdown fences, no extra text, in exactly this
   "whatToTry": "string"
 }`;
 
+/* ---------------- Access gate (auth) ---------------- */
+// Lightweight module-level bridge between the App component's auth state
+// and callClaude(), which is a plain function outside React so it can't
+// read hooks directly. App() keeps these in sync via useEffect.
+const AUTH_STORAGE_KEY = "gist_auth";
+let currentAuthToken = null;
+let onAuthInvalidated = null;
+
+function loadCachedAuth() {
+  try {
+    const raw = sessionStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.token || !parsed?.expiresAt || parsed.expiresAt < Date.now()) {
+      sessionStorage.removeItem(AUTH_STORAGE_KEY);
+      return null;
+    }
+    return parsed;
+  } catch (e) {
+    return null;
+  }
+}
+
+function saveCachedAuth(token, expiresAt) {
+  try {
+    sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ token, expiresAt }));
+  } catch (e) {
+    /* sessionStorage unavailable (e.g. private browsing); token just won't persist across reloads */
+  }
+}
+
+function clearCachedAuth() {
+  try {
+    sessionStorage.removeItem(AUTH_STORAGE_KEY);
+  } catch (e) {
+    /* ignore */
+  }
+}
+
 /* ---------------- API helper ---------------- */
 async function callClaude(systemPrompt, messages) {
   const response = await fetch("/api/claude", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(currentAuthToken ? { Authorization: `Bearer ${currentAuthToken}` } : {}),
+    },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
       max_tokens: 1000,
@@ -636,6 +678,10 @@ async function callClaude(systemPrompt, messages) {
       messages,
     }),
   });
+  if (response.status === 401) {
+    onAuthInvalidated?.();
+    throw new Error("Access code session expired, please re-enter your code");
+  }
   if (!response.ok) throw new Error("API request failed");
   const data = await response.json();
   const textBlocks = (data.content || []).filter((b) => b.type === "text").map((b) => b.text);
@@ -3713,6 +3759,65 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
   );
 }
 
+/* ---------------- Access Gate Screen ---------------- */
+function AccessGateScreen({ onUnlocked }) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit() {
+    if (!code.trim() || loading) return;
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: code.trim() }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(data?.error || "Couldn't verify that code, please try again.");
+        return;
+      }
+      onUnlocked(data.token, data.expiresAt);
+    } catch (e) {
+      setError("Couldn't reach the server, check your connection and try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="max-w-md mx-auto px-6 py-8 step-in min-h-screen flex flex-col justify-center relative">
+      <FloatingDecor density={5} />
+      <div className="text-center mb-4 relative z-10">
+        <div className="flex justify-center mb-1"><CompassRose size={84} /></div>
+        <h1 className="font-display text-6xl font-800 sticker-title mb-1">G.I.S.T.</h1>
+      </div>
+      <div className="relative z-10 bg-white p-8" style={DECKLE}>
+        <p className="font-display font-800 text-sm uppercase tracking-wide text-stone-500 mb-2 text-center">Access Code</p>
+        <p className="font-body text-sm text-stone-600 leading-relaxed mb-5 text-center">
+          Ask your teacher or school for the code to unlock G.I.S.T.
+        </p>
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="Enter access code"
+          autoFocus
+          className="w-full bg-amber-50 rounded-2xl border-2 border-amber-300 px-4 py-4 font-body text-xl text-stone-700 text-center focus:outline-none focus:border-amber-500 placeholder:text-stone-400"
+        />
+        {error && <p className="font-body text-xs text-red-600 text-center mt-3">{error}</p>}
+        <div className="flex justify-center mt-6">
+          <BigButton onClick={handleSubmit} disabled={!code.trim() || loading}>
+            {loading ? "Checking…" : "Unlock"}
+          </BigButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- App ---------------- */
 export default function App() {
   const [screen, setScreen] = useState("setup");
@@ -3734,6 +3839,16 @@ export default function App() {
   const [appClosed, setAppClosed] = useState(false);
   const [bilingual, setBilingual] = useState(false);
   const [revealedCount, setRevealedCount] = useState(1);
+  const [authInfo, setAuthInfo] = useState(() => loadCachedAuth());
+
+  useEffect(() => {
+    currentAuthToken = authInfo?.token || null;
+  }, [authInfo]);
+
+  useEffect(() => {
+    onAuthInvalidated = () => { clearCachedAuth(); setAuthInfo(null); };
+    return () => { onAuthInvalidated = null; };
+  }, []);
 
   useEffect(() => {
     const unlock = () => { unlockSpeechOnce(); if (soundEnabled) startBackgroundMusic(); document.removeEventListener("pointerdown", unlock); };
@@ -3807,6 +3922,22 @@ export default function App() {
   function handleReset() {
     setLog([]);
     setSolvedWords([]);
+  }
+
+  if (!authInfo) {
+    return (
+      <div className="min-h-screen text-stone-700" style={{ fontFamily: "ui-sans-serif, system-ui", background: "linear-gradient(180deg,#FFF6DE 0%,#FFE9AD 55%,#FFDD85 100%)" }}>
+        <FontImport />
+        <PaperGrain />
+        <ScreenFrame />
+        <AccessGateScreen
+          onUnlocked={(token, expiresAt) => {
+            saveCachedAuth(token, expiresAt);
+            setAuthInfo({ token, expiresAt });
+          }}
+        />
+      </div>
+    );
   }
 
   if (appClosed) {

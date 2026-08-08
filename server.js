@@ -7,6 +7,7 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import claudeHandler from "./api/_claudeHandler.js";
+import authHandler from "./api/_authHandler.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, "dist");
@@ -16,6 +17,10 @@ app.use(express.json({ limit: "1mb" }));
 
 app.all("/api/claude", (req, res) => {
   claudeHandler(req, res);
+});
+
+app.all("/api/auth", (req, res) => {
+  authHandler(req, res);
 });
 
 app.use(express.static(distDir));
