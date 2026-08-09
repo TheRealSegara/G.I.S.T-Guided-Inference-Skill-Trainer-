@@ -9,7 +9,7 @@
 // protecting stored student data (the app stores nothing server-side).
 
 import { signToken } from "./_auth.js";
-import { isOriginAllowed, getClientIp, pruneIfLarge, isPlainObjectWithOnlyKeys } from "./_shared.js";
+import { isOriginAllowed, getClientIp, pruneIfLarge, isPlainObjectWithOnlyKeys, DAILY_QUOTA_PER_CODE } from "./_shared.js";
 
 // The exact, complete shape the access-code screen in App.jsx is allowed
 // to send. Anything outside this is rejected outright, not ignored.
@@ -90,5 +90,8 @@ export default async function authHandler(req, res) {
 
   const exp = Date.now() + TOKEN_TTL_MINUTES * 60_000;
   const token = signToken({ label: match.label, exp }, secret);
-  return res.status(200).json({ token, expiresAt: exp });
+  // dailyLimit lets the frontend show/estimate a quota indicator before
+  // any /api/claude call has happened yet this session; the authoritative
+  // used/remaining counts come from each /api/claude response itself.
+  return res.status(200).json({ token, expiresAt: exp, dailyLimit: DAILY_QUOTA_PER_CODE });
 }

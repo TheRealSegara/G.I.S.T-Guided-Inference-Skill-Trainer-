@@ -348,11 +348,37 @@ function getMapTheme(idOrTitle) {
   return MAP_THEMES[hashString(idOrTitle) % MAP_THEMES.length];
 }
 
+// Fixed at 3 (not adjustable) to keep a session's AI-call cost predictable
+// and comfortably within Gemini's free-tier daily quota. Applies both to
+// how many target words a student session covers and how many words a
+// teacher's custom map generates.
+const SESSION_WORD_COUNT = 3;
+
+// AI calls only retry on a malformed/unparseable response, not on
+// network or auth/quota failures (see NON_RETRYABLE_STATUSES below).
+// Kept low since every retry is a real AI-quota call, not a free retry.
+const MAX_RETRY_ATTEMPTS = 2;
+
+// If a word hasn't resolved after this many student answers, auto-reveal
+// it via the same free fallback Skip uses, instead of letting a stuck
+// word consume an unbounded number of AI calls.
+const STUCK_WORD_LIMIT = 4;
+
+// Rough typical-case AI calls for one full session: ~2 calls per word
+// (opening + one answer that resolves it) across SESSION_WORD_COUNT
+// words, plus the transfer test, comprehension check, and diagnostic
+// report. Deliberately the typical case, not STUCK_WORD_LIMIT's worst
+// case — using the worst case here would make this check nearly always
+// block, since it'd exceed most of DAILY_QUOTA_PER_CODE's default on
+// its own. Used to decide whether there's enough quota left today to
+// reasonably start a new session, not a hard guarantee it'll finish.
+const SESSION_COST_ESTIMATE = SESSION_WORD_COUNT * 2 + 3;
+
 const PASSAGES = {
   orangutan: {
     title: "A Trip to the Sanctuary",
     emoji: "🌴",
-    mission: "The ranger needs your help! Learn these 5 words so you can tell your little brother the whole story before bedtime.",
+    mission: "The ranger needs your help! Learn these 3 words so you can tell your little brother the whole story before bedtime.",
     arrival: "You made it! Now you know the sanctuary's secret words, your brother is going to love this story tonight.",
     text: `Last Saturday, Mei Ling went to a wildlife park in Sarawak. At first, her little brother was reluctant to walk into the forest. He held his mother's hand tightly and did not want to go. Then he saw an enormous orang utan in a tree. It was very big, almost as big as a car! He forgot to feel scared. Now he felt curious. He asked question after question about the animal. The orang utan's fur felt damp. It had just rained, so everything outside was wet. The ranger said orang utans look big and strong. But they are actually gentle. They are calm and kind, and they do not hurt people.`,
     words: [
@@ -366,7 +392,7 @@ const PASSAGES = {
   kampung: {
     title: "The Kampung Festival",
     emoji: "🎋",
-    mission: "The festival is starting! Crack these 5 words before the rice cakes are ready, so you can help Aiman welcome the guests.",
+    mission: "The festival is starting! Crack these 3 words before the rice cakes are ready, so you can help Aiman welcome the guests.",
     arrival: "The rice cakes are ready and so are you! You've learned every word in the village today.",
     text: `Every year, Aiman's village has a small festival. It is a harvest festival. The kampung becomes bustling. Many visitors come. There are food stalls and children running everywhere. Aiman's grandmother looks delighted. She smiles a big smile when the rice cakes are ready. The rice cakes smell fragrant. The sweet smell of pandan leaves fills the air. By evening, after cooking and welcoming guests all day, the family feels exhausted. They worked hard, so now they feel very tired. But they are also happy. The neighbours are generous too. They share their food freely with anyone who walks by.`,
     words: [
@@ -380,7 +406,7 @@ const PASSAGES = {
   petshow: {
     title: "Pet Show Day",
     emoji: "🐾",
-    mission: "Help Mei and her friends show off their pets! Learn these 5 words before the judges arrive.",
+    mission: "Help Mei and her friends show off their pets! Learn these 3 words before the judges arrive.",
     arrival: "The judges loved every pet! You solved every word, just like a true pet show champion.",
     text: `Today is Pet Show day at school. Many pupils bring their pets. Mei has a small spider. Spiders can look scary, but she says they are brave hunters. Some animals use camouflage. Camouflage helps them hide from enemies. A gecko can change color like this. Ali's cat is very timid. It hides under the chair when guests come. But Ali's dog is clever. It can open doors by itself! Siti's rabbit is playful. It jumps and runs around the room all day.`,
     words: [
@@ -394,7 +420,7 @@ const PASSAGES = {
   robot: {
     title: "The Robot Show",
     emoji: "🤖",
-    mission: "The science fair starts soon! Learn these 5 words to explain how the amazing robot works.",
+    mission: "The science fair starts soon! Learn these 3 words to explain how the amazing robot works.",
     arrival: "The robot show was a huge success, and so are you! Every word explained, every clue solved.",
     text: `Last week, the school had a robot show. A scientist invented a new robot. She built it from small metal parts. The robot looks powerful. It can lift heavy boxes easily. But the robot is also careful. It never drops anything. Everyone said the robot was amazing. It can dance and sing songs too! Inside the robot is a tiny computer, smaller than your hand. The computer helps the robot think and move.`,
     words: [
@@ -543,12 +569,6 @@ Respond with ONLY valid JSON, no markdown fences, no extra text, in exactly this
   "correctAnswer": "the exact text of the correct option"
 }`;
 
-const SKIP_REVEAL_SYSTEM_PROMPT = `A Malaysian primary school ESL student (age 9-12) is giving up on working out one vocabulary word and needs the answer revealed plainly, since the guided approach didn't work for them this time. You are given the passage and the target word.
-
-Write ONE short, simple sentence (under 15 words) that plainly explains what the word means, in easy Year 4-6 language. This is the one moment where stating the meaning directly is correct and kind, don't make them guess anymore.
-
-Respond with ONLY that one sentence, plain text, no JSON, no quotes, no extra commentary.`;
-
 const SINGLE_WORD_REGEN_PROMPT = `You help a teacher fix one word in a G.I.S.T. map. You are given a passage and a list of words already chosen as targets, do not repeat any of them. Pick ONE different word from the passage that is present exactly as written, meaningfully challenging but inferable for a Year 4-6 ESL learner, with a genuine context clue nearby (contrast, definition, example, or inference).
 
 Respond with ONLY valid JSON, no markdown fences, no extra text, in exactly this shape:
@@ -677,6 +697,55 @@ function clearCachedAuth() {
   }
 }
 
+/* ---------------- Quota tracking (client-side, per-device estimate) ---------------- */
+// The real quota is enforced server-side (api/_claudeHandler.js) no
+// matter what this cache says — this exists only to drive a "X of Y
+// used today" indicator and to block starting a new session when there
+// isn't enough budget left to finish one. It's a same-device estimate,
+// not a global count: Vercel's serverless functions don't share memory
+// across invocations, so there's no way to ask the server "what's the
+// real total" without that ask itself costing a real call. Seeded from
+// dailyLimit on /api/auth, corrected by the authoritative numbers in
+// every /api/claude response after that.
+const QUOTA_STORAGE_KEY = "gist_quota";
+const quotaListeners = new Set();
+
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function loadQuotaCache() {
+  try {
+    const raw = localStorage.getItem(QUOTA_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.date !== todayKey()) return null; // new day, stale
+    return parsed;
+  } catch (e) {
+    return null;
+  }
+}
+
+function saveQuotaCache(fields) {
+  try {
+    const existing = loadQuotaCache() || { used: 0, limit: null };
+    const merged = { date: todayKey(), used: existing.used, limit: existing.limit, ...fields };
+    localStorage.setItem(QUOTA_STORAGE_KEY, JSON.stringify(merged));
+    quotaListeners.forEach((fn) => fn(merged));
+  } catch (e) {
+    /* localStorage unavailable (e.g. private browsing); indicator just won't persist */
+  }
+}
+
+function useQuotaStatus() {
+  const [status, setStatus] = useState(() => loadQuotaCache());
+  useEffect(() => {
+    quotaListeners.add(setStatus);
+    return () => quotaListeners.delete(setStatus);
+  }, []);
+  return status; // null (unknown yet) | { date, used, limit }
+}
+
 /* ---------------- API helper ---------------- */
 async function callClaude(systemPrompt, messages) {
   const response = await fetch("/api/claude", {
@@ -695,6 +764,7 @@ async function callClaude(systemPrompt, messages) {
   if (response.status === 401) onAuthInvalidated?.();
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
+    if (data?.quota) saveQuotaCache({ used: data.quota.used, limit: data.quota.limit });
     const err = new Error(
       response.status === 401
         ? "Access code session expired, please re-enter your code"
@@ -704,6 +774,7 @@ async function callClaude(systemPrompt, messages) {
     throw err;
   }
   const data = await response.json();
+  if (data?.quota) saveQuotaCache({ used: data.quota.used, limit: data.quota.limit });
   const textBlocks = (data.content || []).filter((b) => b.type === "text").map((b) => b.text);
   return textBlocks.join("");
 }
@@ -748,7 +819,7 @@ function safeParseJSON(raw) {
   return null;
 }
 
-async function callClaudeWithRetry(systemPrompt, messages, attempts = 3) {
+async function callClaudeWithRetry(systemPrompt, messages, attempts = MAX_RETRY_ATTEMPTS) {
   let lastError = null;
   for (let i = 0; i < attempts; i++) {
     try {
@@ -804,7 +875,13 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
   const [studentId, setStudentId] = useState("");
   const [avatarConfig, setAvatarConfig] = useState(DEFAULT_AVATAR_CONFIG);
   const [passageId, setPassageId] = useState(null);
-  const [sessionWordCount, setSessionWordCount] = useState(null);
+
+  // Unknown status (null, e.g. localStorage unavailable) fails open:
+  // better to let a session start than block on missing information we
+  // have no way to obtain otherwise.
+  const quotaStatus = useQuotaStatus();
+  const canAffordSession =
+    !quotaStatus || quotaStatus.limit == null || quotaStatus.limit - quotaStatus.used >= SESSION_COST_ESTIMATE;
 
   const [makerText, setMakerText] = useState("");
   const [makerTitle, setMakerTitle] = useState("");
@@ -812,24 +889,10 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
   const [makerGenerating, setMakerGenerating] = useState(false);
   const [makerError, setMakerError] = useState(null);
   const [makerSaved, setMakerSaved] = useState(false);
-  const [makerWordCount, setMakerWordCount] = useState(5);
-  const [makerWords, setMakerWords] = useState(["", "", "", "", ""]);
+  const [makerWords, setMakerWords] = useState(["", "", ""]);
   const [regeneratingIndex, setRegeneratingIndex] = useState(null);
 
   const allPassages = { ...PASSAGES, ...Object.fromEntries(customPassages.map((p) => [p.id, p])) };
-
-  function changeMakerWordCount(delta) {
-    SFX.tap();
-    setMakerWordCount((n) => {
-      const next = Math.max(3, Math.min(10, n + delta));
-      setMakerWords((prev) => {
-        const arr = prev.slice(0, next);
-        while (arr.length < next) arr.push("");
-        return arr;
-      });
-      return next;
-    });
-  }
 
   async function generateMakerLevel() {
     if (!makerText.trim()) return;
@@ -839,14 +902,14 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
     setMakerResult(null);
     const chosenWords = makerWords.map((w) => w.trim()).filter(Boolean);
     const userContent = chosenWords.length
-      ? `${makerText.trim()}\n\nRequired words: use exactly these words for the target list, in this order, spelled exactly as I've written them here: ${chosenWords.join(", ")}. If fewer than ${makerWordCount} are given, pick your own good words to fill the remaining slots.`
+      ? `${makerText.trim()}\n\nRequired words: use exactly these words for the target list, in this order, spelled exactly as I've written them here: ${chosenWords.join(", ")}. If fewer than ${SESSION_WORD_COUNT} are given, pick your own good words to fill the remaining slots.`
       : makerText.trim();
     let lastError = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++) {
       try {
-        const raw = await callClaude(LEVEL_MAKER_SYSTEM_PROMPT(makerWordCount), [{ role: "user", content: userContent }]);
+        const raw = await callClaude(LEVEL_MAKER_SYSTEM_PROMPT(SESSION_WORD_COUNT), [{ role: "user", content: userContent }]);
         const parsed = safeParseJSON(raw);
-        if (parsed && Array.isArray(parsed.words) && parsed.words.length === makerWordCount) {
+        if (parsed && Array.isArray(parsed.words) && parsed.words.length === SESSION_WORD_COUNT) {
           const validated = parsed.words.map((w) => ({
             ...w,
             foundInText: makerText.toLowerCase().includes(String(w.word || "").toLowerCase()),
@@ -1053,7 +1116,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
           <div className="bg-white p-8 step-in relative z-10" style={DECKLE}>
             <p className="text-4xl text-center mb-4">🛠️</p>
             <label className="font-display font-800 text-xl text-stone-700 block mb-2 text-center">Create your own map</label>
-            <p className="font-body text-xs text-stone-500 text-center mb-5">Paste a passage (about 80-150 words). The AI will pick 5 good target words with real context clues.</p>
+            <p className="font-body text-xs text-stone-500 text-center mb-5">Paste a passage (about 80-150 words). The AI will pick {SESSION_WORD_COUNT} good target words with real context clues.</p>
 
             <label className="font-display font-700 text-xs uppercase tracking-wide text-amber-700 block mb-2">Map title</label>
             <input
@@ -1083,35 +1146,17 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
               );
             })()}
 
-            <div className="flex items-center justify-between mb-4 bg-amber-50 rounded-2xl px-4 py-3" style={{ border: "2px solid #b45309" }}>
+            <div className="flex items-center gap-3 mb-4 bg-amber-50 rounded-2xl px-4 py-3" style={{ border: "2px solid #b45309" }}>
+              <p className="font-display font-800 text-2xl text-amber-800">{SESSION_WORD_COUNT}</p>
               <div>
-                <p className="font-display font-700 text-xs uppercase tracking-wide text-amber-700">How many words?</p>
-                <p className="font-body text-[11px] text-stone-500">3 to 10 target words for this map</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => changeMakerWordCount(-1)}
-                  disabled={makerWordCount <= 3}
-                  className="w-9 h-9 rounded-full bg-white font-display font-800 text-lg text-amber-700 disabled:opacity-30"
-                  style={{ border: "2px solid #b45309" }}
-                >
-                  −
-                </button>
-                <span className="font-display font-800 text-2xl text-amber-800 w-6 text-center">{makerWordCount}</span>
-                <button
-                  onClick={() => changeMakerWordCount(1)}
-                  disabled={makerWordCount >= 10}
-                  className="w-9 h-9 rounded-full bg-white font-display font-800 text-lg text-amber-700 disabled:opacity-30"
-                  style={{ border: "2px solid #b45309" }}
-                >
-                  +
-                </button>
+                <p className="font-display font-700 text-xs uppercase tracking-wide text-amber-700">Target Words</p>
+                <p className="font-body text-[11px] text-stone-500">Fixed at {SESSION_WORD_COUNT} to keep each map's AI usage predictable</p>
               </div>
             </div>
 
             <label className="font-display font-700 text-xs uppercase tracking-wide text-amber-700 block mb-1">Words to highlight (optional)</label>
             <p className="font-body text-[11px] text-stone-400 mb-2">Pick specific words yourself, or leave any box blank and the AI will choose good ones for you.</p>
-            <div className="grid gap-2 mb-4" style={{ gridTemplateColumns: `repeat(${Math.min(makerWordCount, 5)}, minmax(0, 1fr))` }}>
+            <div className="grid gap-2 mb-4" style={{ gridTemplateColumns: `repeat(${SESSION_WORD_COUNT}, minmax(0, 1fr))` }}>
               {makerWords.map((w, i) => (
                 <input
                   key={i}
@@ -1210,7 +1255,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
       <TourScreen
         avatarConfig={avatarConfig}
         passage={allPassages[passageId]}
-        onDone={() => onBegin(studentId.trim(), avatarConfig, passageId, sessionWordCount)}
+        onDone={() => onBegin(studentId.trim(), avatarConfig, passageId, SESSION_WORD_COUNT)}
         bilingual={bilingual}
         onToggleBilingual={onToggleBilingual}
       />
@@ -1390,7 +1435,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
               return (
                 <button
                   key={id}
-                  onClick={() => { SFX.tap(); setPassageId(id); setSessionWordCount(p.words.length); }}
+                  onClick={() => { SFX.tap(); setPassageId(id); }}
                   className={`rounded-2xl transition-all ${isLastOdd ? "col-span-2 flex items-center gap-3 text-left p-3" : "flex flex-col items-center text-center gap-1 p-3"} ${
                     isSelected ? "scale-[1.02]" : "hover:opacity-90"
                   }`}
@@ -1403,7 +1448,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                   <span className="text-3xl shrink-0">{p.emoji}</span>
                   <div>
                     <p className="font-display font-800 text-sm" style={{ color: theme.text }}>{p.title}</p>
-                    <p className="font-body text-[10px] leading-snug" style={{ color: theme.text, opacity: 0.75 }}>{p.words.length} tricky words{id.startsWith("custom-") ? " · custom" : ""}</p>
+                    <p className="font-body text-[10px] leading-snug" style={{ color: theme.text, opacity: 0.75 }}>{SESSION_WORD_COUNT} tricky words{id.startsWith("custom-") ? " · custom" : ""}</p>
                   </div>
                 </button>
               );
@@ -1411,38 +1456,26 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
           </div>
 
           {passageId && allPassages[passageId] && (
-            <div className="flex items-center justify-between mt-4 bg-amber-50 rounded-2xl px-4 py-3 step-in" style={{ border: "2px solid #b45309" }}>
+            <div className="flex items-center gap-3 mt-4 bg-amber-50 rounded-2xl px-4 py-3 step-in" style={{ border: "2px solid #b45309" }}>
+              <p className="font-display font-800 text-2xl text-amber-800">{SESSION_WORD_COUNT}</p>
               <div>
-                <p className="font-display font-700 text-sm uppercase tracking-wide text-amber-700">Words today?</p>
-                <p className="font-body text-[11px] text-stone-500">Short on time? Play fewer than the full set.</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => { SFX.tap(); setSessionWordCount((n) => Math.max(3, n - 1)); }}
-                  disabled={sessionWordCount <= 3}
-                  className="w-9 h-9 rounded-full bg-white font-display font-800 text-lg text-amber-700 disabled:opacity-30"
-                  style={{ border: "2px solid #b45309" }}
-                >
-                  −
-                </button>
-                <span className="font-display font-800 text-2xl text-amber-800 w-6 text-center">{sessionWordCount}</span>
-                <button
-                  onClick={() => { SFX.tap(); setSessionWordCount((n) => Math.min(allPassages[passageId].words.length, n + 1)); }}
-                  disabled={sessionWordCount >= allPassages[passageId].words.length}
-                  className="w-9 h-9 rounded-full bg-white font-display font-800 text-lg text-amber-700 disabled:opacity-30"
-                  style={{ border: "2px solid #b45309" }}
-                >
-                  +
-                </button>
+                <p className="font-display font-700 text-sm uppercase tracking-wide text-amber-700">Words Today</p>
+                <p className="font-body text-[11px] text-stone-500">Fixed at {SESSION_WORD_COUNT} to keep each session's AI usage predictable</p>
               </div>
             </div>
+          )}
+
+          {!canAffordSession && (
+            <p className="font-body text-xs text-rose-600 text-center mt-4" aria-live="polite">
+              Today's practice sessions are full on this device. Come back tomorrow, or ask your teacher about the quota!
+            </p>
           )}
 
           <div className="flex items-center justify-center gap-3 mt-6">
             <BigButton variant="ghost" onClick={() => setStep(3)}>
               <ChevronLeft className="inline w-4 h-4 mr-1" /> Back
             </BigButton>
-            <BigButton onClick={() => passageId && setMode("tour")} disabled={!passageId}>
+            <BigButton onClick={() => passageId && setMode("tour")} disabled={!passageId || !canAffordSession}>
               Start my adventure <ArrowRight className="inline w-4 h-4 ml-1" />
             </BigButton>
           </div>
@@ -2126,6 +2159,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
   const [stageReached, setStageReached] = useState(1);
   const [wordDone, setWordDone] = useState(false);
   const hintsUsedRef = useRef(0);
+  const exchangeCountRef = useRef(0);
   const scrollRef = useRef(null);
   const [showSettings, setShowSettings] = useState(false);
 
@@ -2154,23 +2188,17 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
   const clueOptions = splitIntoChunks(getSentenceContaining(passage.text, targetWord.word));
   const contextSentence = getSentenceContaining(passage.text, targetWord.word);
 
-  async function skipWord() {
+  // No AI call here on purpose: this used to ask the model for a
+  // one-sentence explanation, but the always-available fallback below
+  // already fits the moment (the guided approach didn't work, hand off
+  // to the teacher) just as well, for zero AI-quota cost.
+  function skipWord() {
     SFX.click();
-    setLoading(true);
-    let revealText = `"${targetWord.word}" — ask your teacher to explain this one together!`;
-    try {
-      const raw = await callClaude(SKIP_REVEAL_SYSTEM_PROMPT, [
-        { role: "user", content: `Passage: "${passage.text}"\n\nTarget word: "${targetWord.word}"` },
-      ]);
-      if (raw && raw.trim()) revealText = raw.trim();
-    } catch (e) {
-      /* fall back to the generic message above */
-    }
+    const revealText = `"${targetWord.word}" — ask your teacher to explain this one together!`;
     setDisplay((d) => [...d, { from: "coach", text: revealText, revealed: true }]);
     if (soundEnabled) setTimeout(() => speak(revealText), 300);
     setCurrent(null);
     setWordDone(true);
-    setLoading(false);
     setTimeout(() => {
       onWordResolved({
         word: targetWord.word,
@@ -2257,6 +2285,15 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
         };
         setTimeout(() => setPostPhase("gotItVia"), 1400);
       } else {
+        exchangeCountRef.current += 1;
+        if (exchangeCountRef.current >= STUCK_WORD_LIMIT) {
+          // This word has gone STUCK_WORD_LIMIT exchanges without
+          // resolving; auto-reveal via the same free fallback Skip uses
+          // rather than let a genuinely stuck student keep spending AI
+          // calls on a word that isn't landing.
+          skipWord();
+          return;
+        }
         if (parsed.hint_given) { SFX.hint(); } else { SFX.correct(); }
         setDisplay((d) => [...d, { from: "coach", text: parsed.message, hint: parsed.hint_given, stage: parsed.stage }]);
         setCurrent(parsed);
@@ -3563,6 +3600,7 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
   const [showHelp, setShowHelp] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [teacherNotes, setTeacherNotes] = useState("");
+  const quotaStatus = useQuotaStatus();
 
   async function handleDownload() {
     SFX.tap();
@@ -3592,7 +3630,7 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
       content: `Student: ${studentId}\nLog (chronological, oldest first):\n${JSON.stringify(logForModel, null, 2)}\n\nWhole-passage comprehension check:\n${JSON.stringify(comprehensionForModel, null, 2)}${teacherNotes.trim() ? `\n\nTeacher notes about this session's context: ${teacherNotes.trim()}` : ""}`,
     };
     let lastError = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++) {
       try {
         const raw = await callClaude(DIAGNOSTIC_SYSTEM_PROMPT, [userMsg]);
         const parsed = safeParseJSON(raw);
@@ -3642,6 +3680,17 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
           </span>
         </div>
       </div>
+
+      {quotaStatus && quotaStatus.limit != null && (() => {
+        const remaining = Math.max(0, quotaStatus.limit - quotaStatus.used);
+        const tone = remaining <= 0 ? "text-rose-600" : remaining < SESSION_COST_ESTIMATE ? "text-amber-700" : "text-stone-500";
+        return (
+          <p className={`font-body text-[11px] mb-4 relative z-10 pl-14 ${tone}`}>
+            🔋 {remaining} of {quotaStatus.limit} AI turns left today on this device
+            {remaining < SESSION_COST_ESTIMATE && remaining > 0 ? " — getting low, may not cover a full session" : ""}
+          </p>
+        );
+      })()}
 
       {showHelp && (
         <div className="mb-6 p-4 rounded-2xl bg-sky-50 border-2 border-sky-200 step-in font-body text-sm text-stone-700 leading-relaxed">
@@ -3828,6 +3877,7 @@ function AccessGateScreen({ onUnlocked }) {
         setError(data?.error || "Couldn't verify that code, please try again.");
         return;
       }
+      if (data.dailyLimit) saveQuotaCache({ limit: data.dailyLimit });
       onUnlocked(data.token, data.expiresAt);
     } catch (e) {
       setError("Couldn't reach the server, check your connection and try again.");

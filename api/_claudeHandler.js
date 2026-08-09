@@ -10,7 +10,7 @@
 // changes: { content: [{ type: "text", text: "..." }] }.
 
 import { verifyToken } from "./_auth.js";
-import { isOriginAllowed, getClientIp, pruneIfLarge, isPlainObjectWithOnlyKeys } from "./_shared.js";
+import { isOriginAllowed, getClientIp, pruneIfLarge, isPlainObjectWithOnlyKeys, DAILY_QUOTA_PER_CODE } from "./_shared.js";
 
 // The exact, complete shape callClaude() in App.jsx is allowed to send.
 // Anything outside this (extra top-level fields, extra fields on a
@@ -45,17 +45,8 @@ const requestLog = new Map();
 
 // Per-access-code daily quota, keyed by the label embedded in the token
 // (see _authHandler.js / ACCESS_CODES), not by IP. Same best-effort,
-// per-instance caveat as the rate limiter above.
-//
-// Default is deliberately set just under Gemini's real free-tier ceiling
-// for gemini-3.6-flash (20 requests/day, no billing linked — verify your
-// own live number at aistudio.google.com/rate-limit). Since that ceiling
-// is shared by the whole API key regardless of what we set here, going
-// higher wouldn't unlock more real usage, it would just mean Google's
-// raw error shows up instead of ours. The small gap (15 vs 20) is
-// headroom in case our day-boundary calculation and Google's don't reset
-// at exactly the same moment.
-const DAILY_QUOTA_PER_CODE = Number(process.env.DAILY_QUOTA_PER_CODE) || 15;
+// per-instance caveat as the rate limiter above. DAILY_QUOTA_PER_CODE
+// itself lives in _shared.js since _authHandler.js needs it too.
 const quotaLog = new Map();
 
 function isRateLimited(ip) {
@@ -70,16 +61,19 @@ function isRateLimited(ip) {
   return entry.count > RATE_LIMIT_MAX_REQUESTS;
 }
 
-function isOverDailyQuota(label) {
+// Increments and returns this access code's usage for today. Included in
+// every response from this point on so the frontend can show a live "X
+// of Y used today" indicator — there's no separate read-only endpoint
+// for this because Vercel serverless functions don't share memory across
+// different route files, so a standalone /api/quota check would almost
+// always read a different, likely-empty counter instead of this one.
+function getQuotaStatus(label) {
   const day = new Date().toISOString().slice(0, 10);
   pruneIfLarge(quotaLog, 5000, (e) => e.day !== day);
   const entry = quotaLog.get(label);
-  if (!entry || entry.day !== day) {
-    quotaLog.set(label, { day, count: 1 });
-    return false;
-  }
-  entry.count += 1;
-  return entry.count > DAILY_QUOTA_PER_CODE;
+  const used = !entry || entry.day !== day ? 1 : entry.count + 1;
+  quotaLog.set(label, { day, count: used });
+  return { used, limit: DAILY_QUOTA_PER_CODE, remaining: Math.max(0, DAILY_QUOTA_PER_CODE - used), exceeded: used > DAILY_QUOTA_PER_CODE };
 }
 
 function validateBody(body) {
@@ -147,12 +141,13 @@ export default async function claudeHandler(req, res) {
     return res.status(400).json({ error: validationError });
   }
 
-  if (isOverDailyQuota(claims.label)) {
-    return res.status(429).json({ error: "Daily quota reached for this access code, please try again tomorrow" });
+  const quota = getQuotaStatus(claims.label);
+  if (quota.exceeded) {
+    return res.status(429).json({ error: "Daily quota reached for this access code, please try again tomorrow", quota });
   }
 
   if (!process.env.GEMINI_API_KEY) {
-    return res.status(500).json({ error: "Server is missing GEMINI_API_KEY" });
+    return res.status(500).json({ error: "Server is missing GEMINI_API_KEY", quota });
   }
 
   try {
@@ -170,10 +165,10 @@ export default async function claudeHandler(req, res) {
 
     const data = await response.json();
     if (!response.ok) {
-      return res.status(response.status).json({ error: data?.error?.message || "Upstream error" });
+      return res.status(response.status).json({ error: data?.error?.message || "Upstream error", quota });
     }
-    return res.status(200).json(toAnthropicShape(data));
+    return res.status(200).json({ ...toAnthropicShape(data), quota });
   } catch (err) {
-    return res.status(502).json({ error: "Upstream request failed" });
+    return res.status(502).json({ error: "Upstream request failed", quota });
   }
 }
