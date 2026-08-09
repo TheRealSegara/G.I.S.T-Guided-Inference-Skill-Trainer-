@@ -25,12 +25,20 @@ The proxy also applies several protections before forwarding a request:
 - **Method restriction**: only `POST` is accepted. On Vercel this is rejected at the edge, before the request even reaches the Node function (see `middleware.js` below).
 - **Origin allowlist**: if `ALLOWED_ORIGINS` is set, requests must come from one of those origins; otherwise the request is rejected. Leave it unset during initial setup, set it before sharing the deployed link publicly. Also enforced at the edge on Vercel.
 - **Access-code gate**: every request to `/api/claude` must carry a valid, short-lived `Authorization: Bearer <token>` header, obtained by first calling `/api/auth` with a code from `ACCESS_CODES`. See [Access codes](#access-codes-lightweight-multi-teacherschool-auth) below.
-- **Per-code daily quota**: each access code is capped at `DAILY_QUOTA_PER_CODE` requests/day (default 300), tracked by the label embedded in its token, independent of IP.
+- **Per-code daily quota**: each access code is capped at `DAILY_QUOTA_PER_CODE` requests/day (default 15), tracked by the label embedded in its token, independent of IP. This is set just under Gemini's own free-tier ceiling (see [Gemini's free-tier ceiling](#geminis-free-tier-ceiling-read-this-before-a-real-classroom-day) below) — going higher doesn't unlock more real usage.
 - **Payload validation**: model name, prompt/message lengths, and message count are checked against fixed limits before the request is forwarded.
 - **`max_tokens` cap**: forwarded requests are capped regardless of what the client sends.
-- **Best-effort rate limiting**: a per-instance in-memory limiter (20 requests/minute/IP). Since serverless instances are short-lived and not shared, this isn't a global guarantee, it deters casual abuse of a warm instance, not a determined attacker. The real global backstop is the Vercel Firewall rule described below.
+- **Best-effort rate limiting**: a per-instance in-memory limiter (`RATE_LIMIT_MAX_REQUESTS`, default 5/minute/IP, matching Gemini's free-tier RPM ceiling). Since serverless instances are short-lived and not shared, this isn't a global guarantee, it deters casual abuse of a warm instance, not a determined attacker. The real global backstop is the Vercel Firewall rule described below.
 
 The proxy logic itself lives in `api/_claudeHandler.js`, shared between two entry points depending on how you deploy (see below): `api/claude.js` (a Vercel serverless function) and `server.js` (a plain Node/Express server for container-based hosts). The access-code logic follows the same split: `api/_authHandler.js` shared by `api/auth.js` (Vercel) and `server.js`.
+
+## Gemini's free-tier ceiling (read this before a real classroom day)
+
+The **free tier with no billing account linked** — what this project deliberately uses, to keep the risk of an unexpected bill at literally zero — has a real ceiling that's much lower than it might sound: for `gemini-3.6-flash`, **5 requests/minute and 20 requests/day**, shared by your whole API key, not per access code or per student. Check your own live number at [aistudio.google.com/rate-limit](https://aistudio.google.com/rate-limit) — it can vary by account.
+
+One full student session (working through several vocabulary words, plus the transfer test, comprehension check, and diagnostic report) uses roughly 15–25 AI calls on its own. In practice, **that's about one full session per day, total, school-wide**, before Google's own limit kicks in — not enough for real daily classroom use, and worth planning around for a live demo (avoid multiple people running through it back-to-back).
+
+`RATE_LIMIT_MAX_REQUESTS` and `DAILY_QUOTA_PER_CODE` (see below) are deliberately set just under this ceiling, so a student sees G.I.S.T.'s own clear "try again" message instead of a raw error from Google. Raising them doesn't unlock more real usage — Google's limit is what actually stops the request either way. The only way to raise the real ceiling is linking a billing account to move to Gemini's Tier 1 (roughly 150–300 RPM), which stays free unless you exceed a further allowance, but does mean a payment method is on file — a deliberate tradeoff this project has chosen not to make.
 
 ## Access codes (lightweight multi-teacher/school auth)
 

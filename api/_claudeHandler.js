@@ -32,14 +32,30 @@ const MAX_SYSTEM_CHARS = 12000;
 // single abusive client from hammering a warm instance. Vercel's Firewall
 // rate-limit rule (configured in the dashboard, see README) is the real
 // global backstop; this is a second, cheaper layer.
+//
+// Set to match Gemini's actual free-tier ceiling for gemini-3.6-flash (5
+// requests/minute, no billing account linked — verify your own live
+// number at aistudio.google.com/rate-limit, it can differ by account).
+// A higher value here would be pointless: Google's own limit would
+// reject the request first regardless, just with a raw upstream error
+// instead of our own clearer message.
 const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX_REQUESTS = 20;
+const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 5;
 const requestLog = new Map();
 
 // Per-access-code daily quota, keyed by the label embedded in the token
 // (see _authHandler.js / ACCESS_CODES), not by IP. Same best-effort,
 // per-instance caveat as the rate limiter above.
-const DAILY_QUOTA_PER_CODE = Number(process.env.DAILY_QUOTA_PER_CODE) || 300;
+//
+// Default is deliberately set just under Gemini's real free-tier ceiling
+// for gemini-3.6-flash (20 requests/day, no billing linked — verify your
+// own live number at aistudio.google.com/rate-limit). Since that ceiling
+// is shared by the whole API key regardless of what we set here, going
+// higher wouldn't unlock more real usage, it would just mean Google's
+// raw error shows up instead of ours. The small gap (15 vs 20) is
+// headroom in case our day-boundary calculation and Google's don't reset
+// at exactly the same moment.
+const DAILY_QUOTA_PER_CODE = Number(process.env.DAILY_QUOTA_PER_CODE) || 15;
 const quotaLog = new Map();
 
 function isRateLimited(ip) {
