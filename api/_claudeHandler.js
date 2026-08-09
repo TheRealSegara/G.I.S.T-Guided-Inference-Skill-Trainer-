@@ -71,6 +71,9 @@ function validateBody(body) {
     if (!m || (m.role !== "user" && m.role !== "assistant")) return "Invalid message role";
     if (typeof m.content !== "string" || m.content.length > MAX_MESSAGE_CHARS) return "Invalid message content";
   }
+  if (body.max_tokens !== undefined && (typeof body.max_tokens !== "number" || !Number.isFinite(body.max_tokens) || body.max_tokens <= 0)) {
+    return "Invalid max_tokens";
+  }
   return null;
 }
 

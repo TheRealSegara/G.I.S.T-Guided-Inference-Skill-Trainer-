@@ -19,6 +19,17 @@ const app = express();
 // getClientIp() in api/_shared.js when Vercel's x-real-ip isn't present.
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
+// Without this, Express's default error handler returns a raw stack
+// trace (including absolute file paths on the server) to the client for
+// malformed JSON bodies. Vercel's serverless functions don't have this
+// problem (the platform parses/rejects bad JSON itself), but server.js
+// needs its own handling.
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
+    return res.status(400).json({ error: "Invalid JSON body" });
+  }
+  next(err);
+});
 
 app.all("/api/claude", (req, res) => {
   claudeHandler(req, res);
