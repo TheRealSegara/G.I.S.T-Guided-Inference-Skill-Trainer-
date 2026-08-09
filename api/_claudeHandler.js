@@ -36,20 +36,21 @@ const MAX_SYSTEM_CHARS = 12000;
 // account-wide limits are the real backstops; this is a cheap first layer
 // against obvious abuse, not a precise model of Groq's shared token budget.
 //
-// Deliberately looser than a strict division of Groq's 6,000-tokens/minute
-// ceiling by this app's ~1,800-1,900-token coach calls would suggest
-// (~3/minute) — confirmed live that setting was too tight: normal single-
-// student play routinely stacks more than 3 real calls inside one minute
-// (a wrong answer needing a hint, an occasional JSON-repair retry, the
-// transfer test firing right after resolution), tripping our own message
-// during completely ordinary use, not abuse. A per-IP counter isn't the
-// right tool for precisely policing a token budget that's actually shared
-// account-wide across every concurrent student anyway; that's what Groq's
-// own real error and the Vercel Firewall rule are for. This just catches
-// an obviously runaway client. Verify your own live numbers at
-// console.groq.com/docs/rate-limits if tuning this further.
+// Set to match Groq's actual stated free-tier ceiling for
+// llama-3.1-8b-instant (30 requests/minute, no billing linked — verify
+// your own live numbers at console.groq.com/docs/rate-limits, they can
+// differ by account and model), the same "match the real number, don't
+// try to be clever about a sub-limit" approach used for the Gemini
+// version. An earlier attempt here tried to preempt Groq's *token*-per-
+// minute ceiling (6,000) instead by estimating ~3 calls/minute, then 10 —
+// both were confirmed live to be too tight, tripping this during normal
+// single-student play, not abuse. A higher value than the real ceiling
+// would be pointless: Groq's own limit would reject the request first
+// regardless, just with a raw upstream error instead of our own clearer
+// message — exactly the outcome to avoid, so this matches their number
+// directly rather than a hand-estimated fraction of it.
 const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 10;
+const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 30;
 const requestLog = new Map();
 
 // Per-access-code daily quota, keyed by the label embedded in the token
