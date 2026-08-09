@@ -1,13 +1,16 @@
 // Shared request handler for the AI proxy. Used by both api/claude.js
 // (Vercel serverless function) and server.js (Cloud Run / generic Node
-// hosting, e.g. Google AI Studio's deploy target), so the proxy logic and
-// its protections live in exactly one place. Filename is prefixed with
-// "_" so Vercel's file-system routing doesn't turn it into its own route.
+// hosting), so the proxy logic and its protections live in exactly one
+// place. Filename is prefixed with "_" so Vercel's file-system routing
+// doesn't turn it into its own route.
 //
-// Internally this calls Google's Gemini API (free tier) rather than
-// Anthropic's, but translates the request/response to the same shape
-// Anthropic's Messages API uses, so callClaude() in App.jsx needs no
-// changes: { content: [{ type: "text", text: "..." }] }.
+// Internally this calls Groq's API (free tier, OpenAI-compatible chat
+// completions shape) rather than Anthropic's, but translates the
+// request/response to the same shape Anthropic's Messages API uses, so
+// callClaude() in App.jsx needs no changes: { content: [{ type: "text",
+// text: "..." }] }. Chose Groq over Gemini (the original provider) for
+// its far more generous free tier and much faster inference — see the
+// git history / commit messages around this change for the comparison.
 
 import { verifyToken } from "./_auth.js";
 import { isOriginAllowed, getClientIp, pruneIfLarge, isPlainObjectWithOnlyKeys, DAILY_QUOTA_PER_CODE } from "./_shared.js";
@@ -18,9 +21,8 @@ import { isOriginAllowed, getClientIp, pruneIfLarge, isPlainObjectWithOnlyKeys, 
 const ALLOWED_BODY_KEYS = ["model", "system", "messages", "max_tokens"];
 const ALLOWED_MESSAGE_KEYS = ["role", "content"];
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
-const GEMINI_URL = (model, key) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const ALLOWED_MODEL = "claude-sonnet-4-6"; // the model name App.jsx still sends; unused beyond validation
 const MAX_TOKENS_CAP = 1000;
 const MAX_MESSAGES = 40;
@@ -33,14 +35,17 @@ const MAX_SYSTEM_CHARS = 12000;
 // rate-limit rule (configured in the dashboard, see README) is the real
 // global backstop; this is a second, cheaper layer.
 //
-// Set to match Gemini's actual free-tier ceiling for gemini-3.6-flash (5
-// requests/minute, no billing account linked — verify your own live
-// number at aistudio.google.com/rate-limit, it can differ by account).
-// A higher value here would be pointless: Google's own limit would
-// reject the request first regardless, just with a raw upstream error
-// instead of our own clearer message.
+// Set below (not at) llama-3.1-8b-instant's free-tier ceiling — no
+// billing account linked, verify your own live numbers at
+// console.groq.com/docs/rate-limits, they can differ by account. The raw
+// request ceiling is 30/minute, but the *token* ceiling (6,000/minute) is
+// what actually binds first for this app: a single coach turn's system
+// prompt alone runs ~1,800-1,900 tokens, so in practice only about 3 calls
+// fit in a minute before Groq's own token-rate error would show up
+// instead of ours. Set here to stay under that, not the higher-looking
+// but less relevant request count.
 const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 5;
+const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 3;
 const requestLog = new Map();
 
 // Per-access-code daily quota, keyed by the label embedded in the token
@@ -94,20 +99,21 @@ function validateBody(body) {
   return null;
 }
 
-// Anthropic uses role "user"/"assistant"; Gemini uses "user"/"model", and
-// wraps text in a "parts" array instead of a plain string.
-function toGeminiContents(messages) {
-  return messages.map((m) => ({
-    role: m.role === "assistant" ? "model" : "user",
-    parts: [{ text: m.content }],
-  }));
+// Groq's chat completions API is OpenAI-compatible: role "user"/"assistant"
+// plain-string messages, same as Anthropic's shape and what App.jsx already
+// sends, so no per-message reshaping is needed here. The one difference is
+// the system prompt: Groq takes it as a "system"-role message prepended to
+// the array, not a separate top-level field like Gemini's systemInstruction
+// or Anthropic's system param.
+function toGroqMessages(system, messages) {
+  return [{ role: "system", content: system }, ...messages.map((m) => ({ role: m.role, content: m.content }))];
 }
 
-// Reshape Gemini's response into the { content: [{ type, text }] } shape
-// App.jsx's callClaude() already expects from Anthropic's API.
-function toAnthropicShape(geminiData) {
-  const parts = geminiData?.candidates?.[0]?.content?.parts || [];
-  const text = parts.map((p) => p.text || "").join("");
+// Reshape Groq's OpenAI-compatible response into the { content: [{ type,
+// text }] } shape App.jsx's callClaude() already expects from Anthropic's
+// API.
+function toAnthropicShape(groqData) {
+  const text = groqData?.choices?.[0]?.message?.content || "";
   return { content: [{ type: "text", text }] };
 }
 
@@ -135,7 +141,7 @@ export default async function claudeHandler(req, res) {
 
   // Validate the body before spending quota, so a malformed request (or a
   // client bug retrying on failure) can't burn a class's daily budget
-  // without ever reaching Gemini.
+  // without ever reaching Groq.
   const validationError = validateBody(req.body);
   if (validationError) {
     return res.status(400).json({ error: validationError });
@@ -146,20 +152,21 @@ export default async function claudeHandler(req, res) {
     return res.status(429).json({ error: "Daily quota reached for this access code, please try again tomorrow", quota });
   }
 
-  if (!process.env.GEMINI_API_KEY) {
-    return res.status(500).json({ error: "Server is missing GEMINI_API_KEY", quota });
+  if (!process.env.GROQ_API_KEY) {
+    return res.status(500).json({ error: "Server is missing GROQ_API_KEY", quota });
   }
 
   try {
-    const response = await fetch(GEMINI_URL(GEMINI_MODEL, process.env.GEMINI_API_KEY), {
+    const response = await fetch(GROQ_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      },
       body: JSON.stringify({
-        contents: toGeminiContents(req.body.messages),
-        systemInstruction: { parts: [{ text: req.body.system }] },
-        generationConfig: {
-          maxOutputTokens: Math.min(req.body.max_tokens || MAX_TOKENS_CAP, MAX_TOKENS_CAP),
-        },
+        model: GROQ_MODEL,
+        messages: toGroqMessages(req.body.system, req.body.messages),
+        max_tokens: Math.min(req.body.max_tokens || MAX_TOKENS_CAP, MAX_TOKENS_CAP),
       }),
     });
 

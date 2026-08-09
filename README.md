@@ -18,44 +18,44 @@ G.I.S.T. is a short, guided activity a student plays on a tablet or laptop, with
 
 Every AI feature in this app, coaching dialogue, the diagnostic report, the level maker, the comprehension question, calls a single function, `callClaude()` in `src/App.jsx`, which posts to `/api/claude`. That endpoint is a Vercel serverless function (`api/claude.js`) that holds a real API key server-side and forwards the request to the upstream model. The key is never sent to the browser.
 
-The proxy currently calls **Google's Gemini API** (free tier, no credit card required), not Anthropic, chosen to avoid billing during early testing. It translates Gemini's request/response shape internally so `App.jsx` doesn't need to know or care which provider is behind `/api/claude`, that's still the one function every AI feature goes through, same as before. Swapping providers again later (e.g. to Anthropic once budget allows) only means rewriting `api/claude.js`, not the frontend.
+The proxy currently calls **Groq's API** (free tier, no credit card required, OpenAI-compatible chat completions shape), not Anthropic, chosen to avoid billing during early testing (an earlier version used Google's Gemini API; Groq replaced it for a far more generous free tier and much faster inference). It translates Groq's request/response shape internally so `App.jsx` doesn't need to know or care which provider is behind `/api/claude`, that's still the one function every AI feature goes through, same as before. Swapping providers again later (e.g. to Anthropic once budget allows) only means rewriting `api/claude.js`, not the frontend.
 
 The proxy also applies several protections before forwarding a request:
 
 - **Method restriction**: only `POST` is accepted. On Vercel this is rejected at the edge, before the request even reaches the Node function (see `middleware.js` below).
 - **Origin allowlist**: if `ALLOWED_ORIGINS` is set, requests must come from one of those origins; otherwise the request is rejected. Leave it unset during initial setup, set it before sharing the deployed link publicly. Also enforced at the edge on Vercel.
 - **Access-code gate**: every request to `/api/claude` must carry a valid, short-lived `Authorization: Bearer <token>` header, obtained by first calling `/api/auth` with a code from `ACCESS_CODES`. See [Access codes](#access-codes-lightweight-multi-teacherschool-auth) below.
-- **Per-code daily quota**: each access code is capped at `DAILY_QUOTA_PER_CODE` requests/day (default 15), tracked by the label embedded in its token, independent of IP. This is set just under Gemini's own free-tier ceiling (see [Gemini's free-tier ceiling](#geminis-free-tier-ceiling-read-this-before-a-real-classroom-day) below) — going higher doesn't unlock more real usage.
+- **Per-code daily quota**: each access code is capped at `DAILY_QUOTA_PER_CODE` requests/day (default 200), tracked by the label embedded in its token, independent of IP. This is set conservatively under Groq's own free-tier ceiling (see [Groq's free-tier ceiling](#groqs-free-tier-ceiling-read-this-before-a-real-classroom-day) below) — going higher doesn't unlock more real usage.
 - **Payload validation**: model name, prompt/message lengths, and message count are checked against fixed limits before the request is forwarded.
 - **`max_tokens` cap**: forwarded requests are capped regardless of what the client sends.
-- **Best-effort rate limiting**: a per-instance in-memory limiter (`RATE_LIMIT_MAX_REQUESTS`, default 5/minute/IP, matching Gemini's free-tier RPM ceiling). Since serverless instances are short-lived and not shared, this isn't a global guarantee, it deters casual abuse of a warm instance, not a determined attacker. The real global backstop is the Vercel Firewall rule described below.
+- **Best-effort rate limiting**: a per-instance in-memory limiter (`RATE_LIMIT_MAX_REQUESTS`, default 3/minute/IP, staying under Groq's free-tier token-per-minute ceiling for this app's prompt sizes, not its higher-looking request-count ceiling). Since serverless instances are short-lived and not shared, this isn't a global guarantee, it deters casual abuse of a warm instance, not a determined attacker. The real global backstop is the Vercel Firewall rule described below.
 
 The proxy logic itself lives in `api/_claudeHandler.js`, shared between two entry points depending on how you deploy (see below): `api/claude.js` (a Vercel serverless function) and `server.js` (a plain Node/Express server for container-based hosts). The access-code logic follows the same split: `api/_authHandler.js` shared by `api/auth.js` (Vercel) and `server.js`.
 
-## Gemini's free-tier ceiling (read this before a real classroom day)
+## Groq's free-tier ceiling (read this before a real classroom day)
 
-The **free tier with no billing account linked** — what this project deliberately uses, to keep the risk of an unexpected bill at literally zero — has a real ceiling that's much lower than it might sound: for `gemini-3.6-flash`, **5 requests/minute and 20 requests/day**, shared by your whole API key, not per access code or per student. Check your own live number at [aistudio.google.com/rate-limit](https://aistudio.google.com/rate-limit) — it can vary by account.
+The **free tier with no billing account linked** — what this project deliberately uses, to keep the risk of an unexpected bill at literally zero — has a real ceiling worth planning around: for `llama-3.1-8b-instant`, **30 requests/minute, 6,000 tokens/minute, 14,400 requests/day, 500,000 tokens/day**, shared by your whole API key, not per access code or per student. The token limits bind before the request-count ones do for this app: the coach's own system prompt runs ~1,800–1,900 tokens per call, so in practice the real per-minute ceiling is closer to 3 calls, not 30. Check your own live numbers at [console.groq.com/docs/rate-limits](https://console.groq.com/docs/rate-limits) — they can vary by account and model.
 
-One full student session (working through several vocabulary words, plus the transfer test, comprehension check, and diagnostic report) uses roughly 15–25 AI calls on its own. In practice, **that's about one full session per day, total, school-wide**, before Google's own limit kicks in — not enough for real daily classroom use, and worth planning around for a live demo (avoid multiple people running through it back-to-back).
+One full student session (working through 3 vocabulary words, plus the transfer test, comprehension check, and diagnostic report) uses roughly 10–20 AI calls on its own. Even so, that works out to **roughly 20+ full sessions per day, school-wide**, before the daily token ceiling kicks in — a large improvement over the previous Gemini-based free tier (about one session/day, total). Still worth being deliberate about not burning quota on last-minute testing right before a live demo or judging session.
 
-`RATE_LIMIT_MAX_REQUESTS` and `DAILY_QUOTA_PER_CODE` (see below) are deliberately set just under this ceiling, so a student sees G.I.S.T.'s own clear "try again" message instead of a raw error from Google. Raising them doesn't unlock more real usage — Google's limit is what actually stops the request either way. The only way to raise the real ceiling is linking a billing account to move to Gemini's Tier 1 (roughly 150–300 RPM), which stays free unless you exceed a further allowance, but does mean a payment method is on file — a deliberate tradeoff this project has chosen not to make.
+`RATE_LIMIT_MAX_REQUESTS` and `DAILY_QUOTA_PER_CODE` (see below) are deliberately set under this ceiling, so a student sees G.I.S.T.'s own clear "try again" message instead of a raw error from Groq. Raising them doesn't unlock more real usage — Groq's limit is what actually stops the request either way. The only way to raise the real ceiling is moving to a paid Groq tier, a deliberate tradeoff this project has chosen not to make.
 
 ## Access codes (lightweight multi-teacher/school auth)
 
 G.I.S.T. doesn't have real user accounts, there's no database to hold them. Instead, access is gated by shared codes you distribute to teachers or schools:
 
 1. Set `ACCESS_CODES` (see `.env.example`) to a comma-separated list, e.g. `ACCESS_CODES=apple123:SMK Jaya,banana456:SMK Bukit`. The part after `:` is just a label used for quota tracking; you can omit it (`ACCESS_CODES=apple123,banana456`) and the code itself is used as the label.
-2. Set `AUTH_SECRET` to any long random string (e.g. `openssl rand -hex 32`). This signs the short-lived session tokens issued after a correct code; it must stay secret and should differ from `GEMINI_API_KEY`.
+2. Set `AUTH_SECRET` to any long random string (e.g. `openssl rand -hex 32`). This signs the short-lived session tokens issued after a correct code; it must stay secret and should differ from `GROQ_API_KEY`.
 3. On first load, the app shows an access-code screen. A correct code exchanges for a signed token (`/api/auth`), cached in the browser's `sessionStorage` (cleared when the tab closes) for `TOKEN_TTL_MINUTES` (default 720 = 12h, a school day plus margin). Every `/api/claude` call after that carries the token; an expired or missing token gets a 401 and the app re-shows the code screen.
 4. Rotate access by editing `ACCESS_CODES` and redeploying — there's nothing to revoke elsewhere, since codes aren't tied to accounts.
 
-This protects your Gemini quota/cost from random internet traffic; it is **not** meant to protect sensitive data, since the app stores nothing server-side to begin with.
+This protects your Groq quota/cost from random internet traffic; it is **not** meant to protect sensitive data, since the app stores nothing server-side to begin with.
 
 ## Rotating keys and secrets
 
-All three secret values (`GEMINI_API_KEY`, `AUTH_SECRET`, `ACCESS_CODES`) live only in Vercel's Environment Variables (or your host's equivalent) — rotating any of them is: generate/obtain a new value, update it there, redeploy. None of them are referenced anywhere else, so nothing else needs updating.
+All three secret values (`GROQ_API_KEY`, `AUTH_SECRET`, `ACCESS_CODES`) live only in Vercel's Environment Variables (or your host's equivalent) — rotating any of them is: generate/obtain a new value, update it there, redeploy. None of them are referenced anywhere else, so nothing else needs updating.
 
-- **`GEMINI_API_KEY`**: rotate immediately (delete the old key in AI Studio, generate a new one) if it's ever pasted into a chat, screenshot, commit, or anywhere outside Vercel's UI. Do this periodically regardless, as routine hygiene.
+- **`GROQ_API_KEY`**: rotate immediately (delete the old key at console.groq.com/keys, generate a new one) if it's ever pasted into a chat, screenshot, commit, or anywhere outside Vercel's UI. Do this periodically regardless, as routine hygiene.
 - **`AUTH_SECRET`**: rotating it instantly invalidates every currently-issued access token, forcing everyone to re-enter their access code — harmless, since no session data is lost by design.
 - **`ACCESS_CODES`**: see step 4 above — just edit the list.
 
@@ -77,12 +77,12 @@ This blocks abusive IPs before your function runs at all, on top of the access-c
 - Tailwind CSS
 - lucide-react (icons)
 - Browser's native `SpeechSynthesis` API for text-to-speech (no external dependency)
-- Vercel serverless function or Express server for the Gemini API proxy (`api/claude.js` / `server.js`)
+- Vercel serverless function or Express server for the Groq API proxy (`api/claude.js` / `server.js`)
 - No database, no user accounts — access is gated by shared codes (see [Access codes](#access-codes-lightweight-multi-teacherschool-auth)), and session data is entirely in-memory and reset on reload by design (see [Architecture notes](#architecture-notes) below)
 
 ## Getting started
 
-1. Copy `.env.example` to `.env.local` and set `GEMINI_API_KEY` (get one free at aistudio.google.com/apikey), `ACCESS_CODES`, and `AUTH_SECRET`. Set `ALLOWED_ORIGINS` once you have a deployed URL.
+1. Copy `.env.example` to `.env.local` and set `GROQ_API_KEY` (get one free at console.groq.com/keys), `ACCESS_CODES`, and `AUTH_SECRET`. Set `ALLOWED_ORIGINS` once you have a deployed URL.
 2. Install dependencies and run with the Vercel CLI so the `/api` functions and edge middleware are served alongside the frontend:
 
 ```bash
@@ -96,15 +96,15 @@ Running `vite` directly (`npm run dev`) serves the frontend only; `/api/claude` 
 ## Deploying to Vercel
 
 1. Import the repo into a new Vercel project (framework preset: Vite).
-2. In the project's Environment Variables, set `GEMINI_API_KEY` (your free key from aistudio.google.com/apikey), `ACCESS_CODES`, `AUTH_SECRET`, and `ALLOWED_ORIGINS` (your deployed domain, e.g. `https://your-app.vercel.app`). See [Access codes](#access-codes-lightweight-multi-teacherschool-auth) above.
+2. In the project's Environment Variables, set `GROQ_API_KEY` (your free key from console.groq.com/keys), `ACCESS_CODES`, `AUTH_SECRET`, and `ALLOWED_ORIGINS` (your deployed domain, e.g. `https://your-app.vercel.app`). See [Access codes](#access-codes-lightweight-multi-teacherschool-auth) above.
 3. Deploy. Vercel builds the frontend (`npm run build` → `dist/`), picks up `api/claude.js` and `api/auth.js` as serverless functions, and `middleware.js` as edge middleware, automatically.
 4. After the first deploy, add the [Vercel Firewall rate-limit rule](#vercel-firewall-rate-limit-rule-recommended-dashboard-only) above.
 
-## Deploying to a container host (e.g. Google AI Studio / Cloud Run)
+## Deploying to a container host (e.g. Cloud Run)
 
 Container-based hosts don't run per-file serverless functions the way Vercel does, they expect a single process that starts and listens on `process.env.PORT`. `server.js` is that process: it serves the built frontend and handles `/api/claude` itself via Express.
 
-1. Set `GEMINI_API_KEY` and `ALLOWED_ORIGINS` as environment variables/secrets in the host's project settings (in Google AI Studio's case, this may already be wired up automatically from your Google account, since it issues the free key itself).
+1. Set `GROQ_API_KEY` and `ALLOWED_ORIGINS` as environment variables/secrets in the host's project settings.
 2. The host should run `npm install`, then `npm run build` (or the `gcp-build` script, which does the same thing, some GCP buildpacks run this automatically), then `npm start` (`node server.js`). If the host lets you set a build/start command explicitly, use those.
 3. If a deploy fails with something like "container failed to start and listen on the port", it means the host isn't running `npm start`, double check the build/start command configuration rather than the app code.
 4. Only set `TRUST_PROXY_HOPS=1` if this container sits behind the host's own reverse proxy/load balancer (true for Cloud Run). Leave it unset on any host where the process might be reachable directly, otherwise a client can fake their own IP via the `X-Forwarded-For` header and slip past the rate limiter and the access-code brute-force guard.
@@ -114,7 +114,7 @@ Container-based hosts don't run per-file serverless functions the way Vercel doe
 ```
 ├── api/
 │   ├── claude.js            # Vercel serverless function entry point
-│   ├── _claudeHandler.js    # The actual proxy logic (Gemini call + auth + protections), shared with server.js
+│   ├── _claudeHandler.js    # The actual proxy logic (Groq call + auth + protections), shared with server.js
 │   ├── auth.js               # Vercel serverless function entry point for the access-code exchange
 │   ├── _authHandler.js       # Access-code validation + token issuing, shared with server.js
 │   └── _auth.js               # Shared HMAC token sign/verify helpers
