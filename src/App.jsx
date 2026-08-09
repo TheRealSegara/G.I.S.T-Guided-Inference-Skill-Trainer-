@@ -1125,7 +1125,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
         {makerSaved ? (
           <div className="bg-white p-8 step-in relative z-10 text-center" style={DECKLE}>
             <p className="text-5xl mb-4">✅</p>
-            <label className="font-display font-800 text-xl text-stone-700 block mb-2 text-center">Map saved!</label>
+            <h1 className="font-display font-800 text-xl text-stone-700 block mb-2 text-center">Map saved!</h1>
             <p className="font-body text-sm text-stone-500 mb-6">It's ready for a student to play. Hand over the device and tap Start Playing.</p>
             <div className="flex items-center justify-center gap-3">
               <BigButton variant="ghost" onClick={resetMakerAndGoMenu}>
@@ -1139,7 +1139,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
         ) : (
           <div className="bg-white p-8 step-in relative z-10" style={DECKLE}>
             <p className="text-4xl text-center mb-4">🛠️</p>
-            <label className="font-display font-800 text-xl text-stone-700 block mb-2 text-center">Create your own map</label>
+            <h1 className="font-display font-800 text-xl text-stone-700 block mb-2 text-center">Create your own map</h1>
             <p className="font-body text-xs text-stone-500 text-center mb-5">Paste a passage (about 80-150 words). The AI will pick {SESSION_WORD_COUNT} good target words with real context clues.</p>
 
             <label className="font-display font-700 text-xs uppercase tracking-wide text-amber-700 block mb-2">Map title</label>
@@ -1301,7 +1301,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
       {step === 1 && (
         <div className="bg-white p-8 step-in relative z-10 max-w-md mx-auto w-full" style={DECKLE}>
           <p className="text-4xl text-center mb-4">👋</p>
-          <label className="font-display font-800 text-xl text-stone-700 block mb-4 text-center">What's your name or class number?</label>
+          <h1 className="font-display font-800 text-xl text-stone-700 block mb-4 text-center">What's your name or class number?</h1>
           <input
             value={studentId}
             onChange={(e) => setStudentId(e.target.value)}
@@ -1325,7 +1325,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
           <div className="flex items-center gap-3 mb-5 bg-white rounded-2xl px-5 py-3" style={{ border: "2px solid #b45309" }}>
             <span className="text-3xl">🐾</span>
             <div>
-              <p className="font-display font-800 text-xl text-stone-700 leading-tight">Pick your animal companion</p>
+              <h1 className="font-display font-800 text-xl text-stone-700 leading-tight">Pick your animal companion</h1>
               <p className="font-body text-xs text-stone-400">This animal will be your coach for the whole adventure</p>
             </div>
           </div>
@@ -1343,7 +1343,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
 
       {step === 3 && (
         <div className="step-in relative z-10 max-h-full overflow-y-auto">
-          <label className="font-display font-800 text-xl text-stone-700 block mb-3 text-center bg-white/70 rounded-xl py-1.5">Build your explorer</label>
+          <h1 className="font-display font-800 text-xl text-stone-700 block mb-3 text-center bg-white/70 rounded-xl py-1.5">Build your explorer</h1>
 
           <div className="grid grid-cols-3 gap-4">
             <div className="bg-white p-4" style={KID_CARD}>
@@ -1448,7 +1448,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
           <div className="flex items-center gap-3 mb-5 bg-white rounded-2xl px-5 py-3" style={{ border: "2px solid #b45309" }}>
             <span className="text-3xl">🗺️</span>
             <div>
-              <p className="font-display font-800 text-xl text-stone-700 leading-tight">Choose your map</p>
+              <h1 className="font-display font-800 text-xl text-stone-700 leading-tight">Choose your map</h1>
               <p className="font-body text-xs text-stone-400">Pick where your adventure happens today</p>
             </div>
           </div>
@@ -2486,7 +2486,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
 
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
-              <p className="font-display text-2xl sm:text-3xl font-800 text-stone-700 leading-tight">"{targetWord.word}"</p>
+              <h1 className="font-display text-2xl sm:text-3xl font-800 text-stone-700 leading-tight">"{targetWord.word}"</h1>
               <p className="font-hand text-base sm:text-lg text-orange-500 leading-tight">{(COMPANION_PERSONAS[avatarConfig.companion] || COMPANION_PERSONAS.parrot).name} is tracking this word with you!</p>
             </div>
             <div className="flex items-center gap-2 shrink-0 relative">
@@ -3110,7 +3110,7 @@ function ComprehensionScreen({ passage, avatarConfig, onDone }) {
           >
             <AvatarDisplay config={avatarConfig} size={44} />
           </div>
-          <p className="font-display text-2xl sm:text-3xl font-800 text-stone-700 leading-tight">📖 One Last Check</p>
+          <h1 className="font-display text-2xl sm:text-3xl font-800 text-stone-700 leading-tight">📖 One Last Check</h1>
           <p className="font-hand text-base sm:text-lg text-orange-500 leading-tight">Did you follow the whole story, {passage.title}?</p>
         </div>
 
@@ -3223,9 +3223,9 @@ function RecapScreen({ studentId, log, avatarConfig, comprehensionResult, onFini
           <AvatarDisplay config={avatarConfig} size={64} />
           <span className="text-5xl">{companionEmoji}</span>
         </div>
-        <p className="font-display font-800 text-3xl text-stone-700 mt-2 mb-1">
+        <h1 className="font-display font-800 text-3xl text-stone-700 mt-2 mb-1">
           Great adventure, {studentId}!
-        </p>
+        </h1>
         <p className="font-hand text-xl text-orange-500 mb-6">
           Here's what you got good at today
         </p>
@@ -3616,10 +3616,10 @@ function TourScreen({ avatarConfig, passage, onDone, bilingual, onToggleBilingua
         </div>
 
         <span className="text-5xl">{current.emoji}</span>
-        <p className="font-display font-800 text-2xl text-stone-700 mt-2 mb-4">
+        <h1 className="font-display font-800 text-2xl text-stone-700 mt-2 mb-4">
           {current.title}
           {bilingual && current.titleMs && <span className="block font-body font-400 text-base text-stone-400 mt-0.5">{current.titleMs}</span>}
-        </p>
+        </h1>
 
         <div className="min-h-[200px] flex flex-col justify-center mb-6">{current.body}</div>
 
@@ -4129,12 +4129,14 @@ export default function App() {
         <FontImport />
         <PaperGrain />
         <ScreenFrame />
-        <AccessGateScreen
-          onUnlocked={(token, expiresAt) => {
-            saveCachedAuth(token, expiresAt);
-            setAuthInfo({ token, expiresAt });
-          }}
-        />
+        <main>
+          <AccessGateScreen
+            onUnlocked={(token, expiresAt) => {
+              saveCachedAuth(token, expiresAt);
+              setAuthInfo({ token, expiresAt });
+            }}
+          />
+        </main>
       </div>
     );
   }
@@ -4145,7 +4147,9 @@ export default function App() {
         <FontImport />
         <PaperGrain />
         <ScreenFrame />
-        <ClosedScreen />
+        <main>
+          <ClosedScreen />
+        </main>
       </div>
     );
   }
@@ -4172,70 +4176,72 @@ export default function App() {
       {screen !== "coach" && (
         <SoundToggle soundOn={soundOn} onToggle={() => { const next = !soundOn; setSoundOn(next); setSoundEnabledGlobal(next); }} />
       )}
-      {screen === "setup" && <SetupScreen onBegin={handleBegin} customPassages={customPassages} onSaveCustomPassage={handleSaveCustomPassage} onViewDemoReport={() => setScreen("demo-report")} bilingual={bilingual} onToggleBilingual={() => setBilingual((b) => !b)} />}
-      {screen === "demo-report" && (
-        <TeacherScreen
-          studentId="Sample Student"
-          log={SAMPLE_LOG}
-          onBack={() => setScreen("setup")}
-          onReset={() => setScreen("setup")}
-          sessionStartedAt={Date.now() - 600000}
-          comprehensionResult={SAMPLE_COMPREHENSION}
-          isDemo
-        />
-      )}
-      {screen === "passage" && (
-        <PassageScreen
-          passage={passage}
-          solvedWords={solvedWords}
-          onPickWord={(w) => {
-            setActiveWord(w);
-            setWordIndex(solvedWords.length);
-            setScreen("coach");
-          }}
-          onOpenTeacher={() => setScreen("teacher")}
-          avatarConfig={avatarConfig}
-          totalLogCount={log.length}
-          streakMsg={streakMsg}
-          studentId={studentId}
-          log={log}
-          sessionStartedAt={sessionStartedAt}
-          revealedCount={revealedCount}
-          onRevealNext={() => setRevealedCount((n) => n + 1)}
-        />
-      )}
-      {screen === "coach" && activeWord && (
-        <CoachScreen
-          passage={passage}
-          targetWord={activeWord}
-          avatarConfig={avatarConfig}
-          onWordResolved={handleWordResolved}
-          onBack={() => setScreen("passage")}
-          soundOn={soundOn}
-          onToggleSound={(next) => { setSoundOn(next); setSoundEnabledGlobal(next); }}
-          wordIndex={wordIndex}
-          isTransferWord={activeWord && transferWordId === activeWord.word}
-        />
-      )}
-      {screen === "comprehension" && (
-        <ComprehensionScreen
-          passage={passage}
-          avatarConfig={avatarConfig}
-          onDone={(result) => { setComprehensionResult(result); setScreen("recap"); }}
-        />
-      )}
-      {screen === "recap" && (
-        <RecapScreen
-          studentId={studentId}
-          log={log}
-          avatarConfig={avatarConfig}
-          comprehensionResult={comprehensionResult}
-          onFinish={() => setScreen("passage")}
-        />
-      )}
-      {screen === "teacher" && (
-        <TeacherScreen studentId={studentId} log={log} onBack={() => setScreen("passage")} onReset={handleReset} sessionStartedAt={sessionStartedAt} comprehensionResult={comprehensionResult} />
-      )}
+      <main>
+        {screen === "setup" && <SetupScreen onBegin={handleBegin} customPassages={customPassages} onSaveCustomPassage={handleSaveCustomPassage} onViewDemoReport={() => setScreen("demo-report")} bilingual={bilingual} onToggleBilingual={() => setBilingual((b) => !b)} />}
+        {screen === "demo-report" && (
+          <TeacherScreen
+            studentId="Sample Student"
+            log={SAMPLE_LOG}
+            onBack={() => setScreen("setup")}
+            onReset={() => setScreen("setup")}
+            sessionStartedAt={Date.now() - 600000}
+            comprehensionResult={SAMPLE_COMPREHENSION}
+            isDemo
+          />
+        )}
+        {screen === "passage" && (
+          <PassageScreen
+            passage={passage}
+            solvedWords={solvedWords}
+            onPickWord={(w) => {
+              setActiveWord(w);
+              setWordIndex(solvedWords.length);
+              setScreen("coach");
+            }}
+            onOpenTeacher={() => setScreen("teacher")}
+            avatarConfig={avatarConfig}
+            totalLogCount={log.length}
+            streakMsg={streakMsg}
+            studentId={studentId}
+            log={log}
+            sessionStartedAt={sessionStartedAt}
+            revealedCount={revealedCount}
+            onRevealNext={() => setRevealedCount((n) => n + 1)}
+          />
+        )}
+        {screen === "coach" && activeWord && (
+          <CoachScreen
+            passage={passage}
+            targetWord={activeWord}
+            avatarConfig={avatarConfig}
+            onWordResolved={handleWordResolved}
+            onBack={() => setScreen("passage")}
+            soundOn={soundOn}
+            onToggleSound={(next) => { setSoundOn(next); setSoundEnabledGlobal(next); }}
+            wordIndex={wordIndex}
+            isTransferWord={activeWord && transferWordId === activeWord.word}
+          />
+        )}
+        {screen === "comprehension" && (
+          <ComprehensionScreen
+            passage={passage}
+            avatarConfig={avatarConfig}
+            onDone={(result) => { setComprehensionResult(result); setScreen("recap"); }}
+          />
+        )}
+        {screen === "recap" && (
+          <RecapScreen
+            studentId={studentId}
+            log={log}
+            avatarConfig={avatarConfig}
+            comprehensionResult={comprehensionResult}
+            onFinish={() => setScreen("passage")}
+          />
+        )}
+        {screen === "teacher" && (
+          <TeacherScreen studentId={studentId} log={log} onBack={() => setScreen("passage")} onReset={handleReset} sessionStartedAt={sessionStartedAt} comprehensionResult={comprehensionResult} />
+        )}
+      </main>
     </div>
   );
 }
