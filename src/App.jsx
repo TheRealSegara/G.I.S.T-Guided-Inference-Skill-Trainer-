@@ -1129,7 +1129,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
               </BigButton>
             </div>
 
-            {makerError && <p className="font-body text-xs text-rose-600 text-center mb-4">{makerError}</p>}
+            {makerError && <p className="font-body text-xs text-rose-600 text-center mb-4" aria-live="polite">{makerError}</p>}
 
             {makerResult && (
               <div className="mb-4 p-4 rounded-2xl bg-teal-50 step-in" style={{ border: "2px solid #0d9488" }}>
@@ -1600,7 +1600,11 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, avatar
     <div className="max-w-5xl mx-auto px-6 py-8 step-in relative">
       <FloatingDecor density={5} />
       <PersistentCompanion avatarConfig={avatarConfig} />
-      <div className="flex items-center gap-2 mb-5 relative z-10">
+      {/* pl-14/pr-14 clear the fixed close (X) and sound-toggle buttons
+          pinned at top-4 left-4 / top-4 right-4 (same overlap fixed on
+          TeacherScreen: this row's title and "Teacher view" button would
+          otherwise sit underneath them). */}
+      <div className="flex items-center gap-2 mb-5 relative z-10 pl-14 pr-14">
         <CompassRose size={36} />
         <p className="font-display font-800 text-xl sticker-title">G.I.S.T.</p>
         <SessionTimer startedAt={sessionStartedAt} className="ml-auto font-mono text-xs text-stone-500 bg-white rounded-full px-3 py-1.5 border-2 border-stone-300" />
@@ -2547,7 +2551,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
               )}
 
               {error && (
-                <div className="border-2 border-rose-300 bg-rose-50 text-rose-600 font-body text-sm px-4 py-3 rounded-2xl flex items-center justify-between gap-2 step-in">
+                <div className="border-2 border-rose-300 bg-rose-50 text-rose-600 font-body text-sm px-4 py-3 rounded-2xl flex items-center justify-between gap-2 step-in" aria-live="polite">
                   {error}
                   <BigButton variant="ghost" onClick={() => (history.length <= 1 ? startWord() : submitAnswer(display[display.length - 1]?.text || ""))}>
                     Retry
@@ -3619,7 +3623,12 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
   return (
     <div className="max-w-4xl mx-auto px-6 py-8 step-in relative">
       <FloatingDecor density={4} />
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-2 relative z-10">
+      {/* pl-14/pr-14 clear the fixed close (X) and sound-toggle buttons
+          pinned at top-4 left-4 / top-4 right-4, which otherwise overlap
+          this row's Back button and "Teacher view" label on every screen
+          that reaches TeacherScreen (both a real post-session report and
+          the sample report from the main menu). */}
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-2 relative z-10 pl-14 pr-14">
         <button onClick={onBack} className="flex items-center gap-1 font-display font-700 text-xs text-stone-400 hover:text-stone-600 bg-white rounded-full px-3 py-1.5 border-2 border-stone-200">
           <ChevronLeft className="w-3.5 h-3.5" /> Back
         </button>
@@ -3669,7 +3678,7 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
         <BigButton onClick={generateSummary} disabled={log.length === 0 || loading}>
           {loading ? "Analysing…" : "🔎 Generate diagnostic summary"}
         </BigButton>
-        {error && <p className="font-body text-xs text-rose-600 mt-3">{error}</p>}
+        {error && <p className="font-body text-xs text-rose-600 mt-3" aria-live="polite">{error}</p>}
       </div>
 
       {summary && (
