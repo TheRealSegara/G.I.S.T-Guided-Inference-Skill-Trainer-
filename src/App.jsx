@@ -52,7 +52,8 @@ const FontImport = () => (
     }
     @media (prefers-reduced-motion: reduce) {
       .step-in, .bounce-in, .float-slow, .float-med, .wiggle, .spin-slow,
-      .confetti-piece, .companion-bob, .companion-speaking, .sparkle-piece {
+      .confetti-piece, .companion-bob, .companion-speaking, .sparkle-piece,
+      .animate-pulse {
         animation: none !important;
       }
     }
@@ -868,6 +869,30 @@ const AvatarBadge = ({ config, size = "w-14 h-14", pixelSize = 56 }) => (
   </div>
 );
 
+function MakerResultSkeleton() {
+  const bar = (widthClass, toneClass) => <div className={`h-3 ${widthClass} ${toneClass} rounded-full animate-pulse`} />;
+  const chip = (widthClass) => <div className={`h-7 ${widthClass} bg-teal-200/50 rounded-full animate-pulse`} />;
+  return (
+    <div className="mb-4 p-4 rounded-2xl bg-teal-50 step-in" style={{ border: "2px solid #0d9488" }} aria-hidden="true">
+      <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl" style={{ background: "#f5f5f4", border: "2px solid #d6d3d1" }}>
+        <div className="w-6 h-6 rounded-full bg-stone-300/60 animate-pulse" />
+        <div className="space-y-1.5 flex-1">
+          {bar("w-32", "bg-stone-300/60")}
+          {bar("w-48", "bg-stone-300/40")}
+        </div>
+      </div>
+      <div className="space-y-1.5 mb-2">{bar("w-full", "bg-teal-300/40")}</div>
+      <div className="space-y-1.5 mb-3">{bar("w-4/5", "bg-teal-300/40")}</div>
+      {bar("w-28", "bg-teal-400/50")}
+      <div className="flex flex-wrap gap-2 mt-2">
+        {chip("w-20")}
+        {chip("w-24")}
+        {chip("w-16")}
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- Setup Screen ---------------- */
 function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoReport, bilingual, onToggleBilingual }) {
   const [mode, setMode] = useState(null); // null (main menu) | "tour" | "play" | "maker"
@@ -1175,6 +1200,8 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
             </div>
 
             {makerError && <p className="font-body text-xs text-rose-600 text-center mb-4" aria-live="polite">{makerError}</p>}
+
+            {makerGenerating && <MakerResultSkeleton />}
 
             {makerResult && (
               <div className="mb-4 p-4 rounded-2xl bg-teal-50 step-in" style={{ border: "2px solid #0d9488" }}>
@@ -1663,9 +1690,9 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, avatar
       )}
 
       <div className="bg-white p-6" style={{ ...DECKLE, borderColor: theme.border }}>
-        <h2 className="font-display text-2xl font-800 mb-4 flex items-center gap-2" style={{ color: theme.text }}>
+        <h1 className="font-display text-2xl font-800 mb-4 flex items-center gap-2" style={{ color: theme.text }}>
           <span className="text-3xl">{passage.emoji}</span> {passage.title}
-        </h2>
+        </h1>
         <div className="font-body text-lg leading-9 text-stone-700" style={{ columnCount: 2, columnGap: "2.5rem" }}>{renderPassage()}</div>
       </div>
       <p className="font-hand text-lg text-stone-600 mt-4 text-center bg-white/70 rounded-xl py-1.5">
@@ -3602,6 +3629,51 @@ function TourScreen({ avatarConfig, passage, onDone, bilingual, onToggleBilingua
   );
 }
 
+// Placeholder shaped like the real diagnostic report (same section colors
+// and layout, pulsing bars instead of text) shown while it's generating,
+// instead of leaving that whole area blank with only the button's label
+// changed. aria-hidden since it carries no real information for screen
+// readers to announce.
+function DiagnosticReportSkeleton() {
+  const bar = (widthClass, toneClass) => <div className={`h-3 ${widthClass} ${toneClass} rounded-full animate-pulse`} />;
+  return (
+    <div className="relative z-10 mb-6 space-y-4 step-in" aria-hidden="true">
+      <div className="p-6 rounded-3xl space-y-2.5" style={{ background: "#fee2e2", border: "4px solid #dc2626" }}>
+        {bar("w-32 mx-auto", "bg-red-300/60")}
+        {bar("w-full", "bg-red-300/40")}
+        {bar("w-4/5 mx-auto", "bg-red-300/40")}
+      </div>
+      <div className="p-6 rounded-3xl space-y-2.5" style={{ background: "#ffedd5", border: "4px solid #c2410c" }}>
+        {bar("w-40 mx-auto", "bg-orange-300/60")}
+        {bar("w-full", "bg-orange-300/40")}
+        {bar("w-3/5 mx-auto", "bg-orange-300/40")}
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="p-5 rounded-3xl space-y-2.5" style={{ background: "#dbeafe", border: "3px solid #2563eb" }}>
+          {bar("w-24", "bg-blue-300/60")}
+          {bar("w-full", "bg-blue-300/40")}
+          {bar("w-4/5", "bg-blue-300/40")}
+        </div>
+        <div className="p-5 rounded-3xl space-y-2.5" style={{ background: "#dbeafe", border: "3px solid #2563eb" }}>
+          {bar("w-28", "bg-blue-300/60")}
+          {bar("w-full", "bg-blue-300/40")}
+          {bar("w-3/5", "bg-blue-300/40")}
+        </div>
+      </div>
+      <div className="p-6 rounded-3xl space-y-2.5" style={{ background: "#fef3c7", border: "4px solid #d97706" }}>
+        {bar("w-36 mx-auto", "bg-amber-300/60")}
+        {bar("w-full", "bg-amber-300/40")}
+        {bar("w-4/5 mx-auto", "bg-amber-300/40")}
+      </div>
+      <div className="p-6 rounded-3xl space-y-2.5" style={{ background: "linear-gradient(135deg,#fef3c7,#fde68a)", border: "4px solid #d97706" }}>
+        {bar("w-40 mx-auto", "bg-amber-400/60")}
+        {bar("w-full", "bg-amber-400/40")}
+        {bar("w-3/5 mx-auto", "bg-amber-400/40")}
+      </div>
+    </div>
+  );
+}
+
 function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comprehensionResult, isDemo = false }) {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -3718,7 +3790,7 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
         </div>
       )}
 
-      <h2 className="font-display text-3xl font-800 text-stone-700 mb-1 flex items-center gap-2 relative z-10">📔 Explorer's Field Journal</h2>
+      <h1 className="font-display text-3xl font-800 text-stone-700 mb-1 flex items-center gap-2 relative z-10">📔 Explorer's Field Journal</h1>
       <p className="font-body text-xs text-stone-500 mb-4 relative z-10">Student / Class: {studentId} · {log.length} landmark{log.length === 1 ? "" : "s"} logged this session</p>
 
       <div className="mb-5 relative z-10">
@@ -3738,6 +3810,8 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
         </BigButton>
         {error && <p className="font-body text-xs text-rose-600 mt-3" aria-live="polite">{error}</p>}
       </div>
+
+      {loading && <DiagnosticReportSkeleton />}
 
       {summary && (
         <div className="relative z-10 mb-6 space-y-4 step-in">
