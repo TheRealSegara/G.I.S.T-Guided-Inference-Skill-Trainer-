@@ -9,6 +9,7 @@
 // protecting stored student data (the app stores nothing server-side).
 
 import { signToken } from "./_auth.js";
+import { isOriginAllowed, getClientIp, pruneIfLarge } from "./_shared.js";
 
 const TOKEN_TTL_MINUTES = Number(process.env.TOKEN_TTL_MINUTES) || 720; // 12h: a school day plus margin
 const MAX_ATTEMPTS = 10;
@@ -30,15 +31,10 @@ function getAccessCodes() {
     .filter((c) => c.code);
 }
 
-function getClientIp(req) {
-  const fwd = req.headers["x-forwarded-for"];
-  if (typeof fwd === "string" && fwd.length) return fwd.split(",")[0].trim();
-  return req.socket?.remoteAddress || "unknown";
-}
-
 // Best-effort per-instance brute-force guard on code attempts, same
 // caveats as the rate limiter in _claudeHandler.js (resets per instance).
 function isBruteForceBlocked(ip) {
+  pruneIfLarge(attemptLog, 5000, (e) => Date.now() - e.windowStart > ATTEMPT_WINDOW_MS);
   const now = Date.now();
   const entry = attemptLog.get(ip);
   if (!entry || now - entry.windowStart > ATTEMPT_WINDOW_MS) {
@@ -53,6 +49,10 @@ export default async function authHandler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  if (!isOriginAllowed(req)) {
+    return res.status(403).json({ error: "Origin not allowed" });
   }
 
   const ip = getClientIp(req);

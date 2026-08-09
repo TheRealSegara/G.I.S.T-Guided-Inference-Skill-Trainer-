@@ -42,6 +42,20 @@ const FontImport = () => (
     .parchment-card {
       background-image: radial-gradient(ellipse at center, rgba(217,119,6,0.04) 0%, rgba(217,119,6,0.09) 100%);
     }
+    /* Buttons/inputs across the app use focus:outline-none with only a
+       border-color change as a substitute; this restores a strong,
+       keyboard-only focus indicator on top of that without touching every
+       component's className. */
+    :focus-visible {
+      outline: 3px solid #2563eb !important;
+      outline-offset: 2px !important;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .step-in, .bounce-in, .float-slow, .float-med, .wiggle, .spin-slow,
+      .confetti-piece, .companion-bob, .companion-speaking, .sparkle-piece {
+        animation: none !important;
+      }
+    }
   `}</style>
 );
 
@@ -678,15 +692,27 @@ async function callClaude(systemPrompt, messages) {
       messages,
     }),
   });
-  if (response.status === 401) {
-    onAuthInvalidated?.();
-    throw new Error("Access code session expired, please re-enter your code");
+  if (response.status === 401) onAuthInvalidated?.();
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    const err = new Error(
+      response.status === 401
+        ? "Access code session expired, please re-enter your code"
+        : data?.error || "API request failed"
+    );
+    err.status = response.status;
+    throw err;
   }
-  if (!response.ok) throw new Error("API request failed");
   const data = await response.json();
   const textBlocks = (data.content || []).filter((b) => b.type === "text").map((b) => b.text);
   return textBlocks.join("");
 }
+
+// Failures the server can't resolve by simply being asked again: retrying
+// just delays showing the real message (or, for 401, spams /api/claude
+// with an already-invalidated token). Only network hiccups and malformed
+// JSON responses are worth a retry.
+const NON_RETRYABLE_STATUSES = new Set([400, 401, 403, 429]);
 
 function safeParseJSON(raw) {
   let cleaned = raw.trim();
@@ -732,12 +758,13 @@ async function callClaudeWithRetry(systemPrompt, messages, attempts = 3) {
       lastError = new Error("Response wasn't valid JSON");
     } catch (e) {
       lastError = e;
+      if (NON_RETRYABLE_STATUSES.has(e.status)) break;
     }
     if (i < attempts - 1) {
       await new Promise((resolve) => setTimeout(resolve, 400 * (i + 1)));
     }
   }
-  return null;
+  throw lastError || new Error("Couldn't get a response, please try again");
 }
 
 
@@ -838,6 +865,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
         lastError = new Error("Unexpected response format");
       } catch (e) {
         lastError = e;
+        if (NON_RETRYABLE_STATUSES.has(e.status)) break;
       }
     }
     setMakerError(`Couldn't generate the map just now. ${lastError ? lastError.message : ""} Try again.`);
@@ -1802,12 +1830,24 @@ function CloseConfirmModal({ onCancel, onConfirm, screen, studentId }) {
   const inActiveSession = screen === "passage" || screen === "coach" || screen === "comprehension" || screen === "teacher";
   const atRecap = screen === "recap";
 
+  useEffect(() => {
+    const onKeyDown = (e) => { if (e.key === "Escape") onCancel(); };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onCancel]);
+
   return (
     <div className="fixed inset-0 flex items-center justify-center p-6" style={{ zIndex: 1000 }}>
-      <div className="absolute inset-0" style={{ background: "rgba(41,37,36,0.55)", backdropFilter: "blur(4px)" }} onClick={onCancel} />
-      <div className="relative bg-white p-6 sm:p-8 text-center max-w-sm w-full step-in" style={{ borderRadius: "32px", border: "3px solid #b45309", boxShadow: "0 6px 0 0 #92400e" }}>
+      <div className="absolute inset-0" style={{ background: "rgba(41,37,36,0.55)", backdropFilter: "blur(4px)" }} onClick={onCancel} aria-hidden="true" />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="close-confirm-heading"
+        className="relative bg-white p-6 sm:p-8 text-center max-w-sm w-full step-in"
+        style={{ borderRadius: "32px", border: "3px solid #b45309", boxShadow: "0 6px 0 0 #92400e" }}
+      >
         <p className="text-4xl mb-3">🧭</p>
-        <p className="font-display font-800 text-xl text-stone-700 mb-2">Are you sure you want to close G.I.S.T.?</p>
+        <p id="close-confirm-heading" className="font-display font-800 text-xl text-stone-700 mb-2">Are you sure you want to close G.I.S.T.?</p>
         <p className="font-body text-sm text-stone-500 mb-6">
           {inActiveSession
             ? `${studentId ? `${studentId}'s` : "This"} session is still in progress. All progress will be lost and can't be recovered.`
@@ -2168,7 +2208,6 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
     const msgs = [{ role: "user", content: openingMsg }];
     try {
       const parsed = await callClaudeWithRetry(buildCoachSystemPrompt(avatarConfig.companion, stage1Type, stage2Type, stage3Type), msgs);
-      if (!parsed) throw new Error("parse fail");
       setHistory([...msgs, { role: "assistant", content: JSON.stringify(parsed) }]);
       setCurrent(parsed);
       setStageReached(parsed.stage || 1);
@@ -2191,7 +2230,6 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
     const newHistory = [...history, { role: "user", content: answerText }];
     try {
       const parsed = await callClaudeWithRetry(buildCoachSystemPrompt(avatarConfig.companion, stage1Type, stage2Type, stage3Type), newHistory);
-      if (!parsed) throw new Error("parse fail");
       const updatedHistory = [...newHistory, { role: "assistant", content: JSON.stringify(parsed) }];
       setHistory(updatedHistory);
       if (parsed.hint_given) hintsUsedRef.current += 1;
@@ -3569,6 +3607,7 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
         lastError = new Error("Response wasn't in the expected format");
       } catch (e) {
         lastError = e;
+        if (NON_RETRYABLE_STATUSES.has(e.status)) break;
       }
     }
     setError(`Couldn't generate the summary just now. ${lastError ? lastError.message : ""} Try again.`);
@@ -3804,10 +3843,13 @@ function AccessGateScreen({ onUnlocked }) {
           value={code}
           onChange={(e) => setCode(e.target.value)}
           placeholder="Enter access code"
+          aria-label="Access code"
+          autoComplete="off"
+          spellCheck={false}
           autoFocus
           className="w-full bg-amber-50 rounded-2xl border-2 border-amber-300 px-4 py-4 font-body text-xl text-stone-700 text-center focus:outline-none focus:border-amber-500 placeholder:text-stone-400"
         />
-        {error && <p className="font-body text-xs text-red-600 text-center mt-3">{error}</p>}
+        {error && <p className="font-body text-xs text-red-600 text-center mt-3" aria-live="polite">{error}</p>}
         <div className="flex justify-center mt-6">
           <BigButton onClick={handleSubmit} disabled={!code.trim() || loading}>
             {loading ? "Checking…" : "Unlock"}

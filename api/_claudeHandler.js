@@ -10,6 +10,7 @@
 // changes: { content: [{ type: "text", text: "..." }] }.
 
 import { verifyToken } from "./_auth.js";
+import { isOriginAllowed, getClientIp, pruneIfLarge } from "./_shared.js";
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 const GEMINI_URL = (model, key) =>
@@ -35,28 +36,8 @@ const requestLog = new Map();
 const DAILY_QUOTA_PER_CODE = Number(process.env.DAILY_QUOTA_PER_CODE) || 300;
 const quotaLog = new Map();
 
-function getAllowedOrigins() {
-  return (process.env.ALLOWED_ORIGINS || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function isOriginAllowed(req) {
-  const allowed = getAllowedOrigins();
-  if (allowed.length === 0) return true; // not configured yet: allow (see README)
-  const origin = req.headers.origin || "";
-  const referer = req.headers.referer || "";
-  return allowed.some((a) => origin.startsWith(a) || referer.startsWith(a));
-}
-
-function getClientIp(req) {
-  const fwd = req.headers["x-forwarded-for"];
-  if (typeof fwd === "string" && fwd.length) return fwd.split(",")[0].trim();
-  return req.socket?.remoteAddress || "unknown";
-}
-
 function isRateLimited(ip) {
+  pruneIfLarge(requestLog, 5000, (e) => Date.now() - e.windowStart > RATE_LIMIT_WINDOW_MS);
   const now = Date.now();
   const entry = requestLog.get(ip);
   if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
@@ -69,6 +50,7 @@ function isRateLimited(ip) {
 
 function isOverDailyQuota(label) {
   const day = new Date().toISOString().slice(0, 10);
+  pruneIfLarge(quotaLog, 5000, (e) => e.day !== day);
   const entry = quotaLog.get(label);
   if (!entry || entry.day !== day) {
     quotaLog.set(label, { day, count: 1 });
@@ -131,13 +113,16 @@ export default async function claudeHandler(req, res) {
     return res.status(401).json({ error: "Missing or expired access token" });
   }
 
-  if (isOverDailyQuota(claims.label)) {
-    return res.status(429).json({ error: "Daily quota reached for this access code, please try again tomorrow" });
-  }
-
+  // Validate the body before spending quota, so a malformed request (or a
+  // client bug retrying on failure) can't burn a class's daily budget
+  // without ever reaching Gemini.
   const validationError = validateBody(req.body);
   if (validationError) {
     return res.status(400).json({ error: validationError });
+  }
+
+  if (isOverDailyQuota(claims.label)) {
+    return res.status(429).json({ error: "Daily quota reached for this access code, please try again tomorrow" });
   }
 
   if (!process.env.GEMINI_API_KEY) {

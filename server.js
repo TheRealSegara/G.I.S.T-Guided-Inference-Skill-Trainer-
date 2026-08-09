@@ -13,6 +13,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, "dist");
 
 const app = express();
+// Trust exactly one hop (the host's own load balancer/reverse proxy, e.g.
+// Cloud Run's) so req.ip resolves the real client IP instead of a raw,
+// client-suppliable X-Forwarded-For value. Used as a fallback by
+// getClientIp() in api/_shared.js when Vercel's x-real-ip isn't present.
+app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
 
 app.all("/api/claude", (req, res) => {
