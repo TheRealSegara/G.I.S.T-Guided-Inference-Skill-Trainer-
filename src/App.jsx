@@ -2192,7 +2192,15 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
   // one-sentence explanation, but the always-available fallback below
   // already fits the moment (the guided approach didn't work, hand off
   // to the teacher) just as well, for zero AI-quota cost.
-  function skipWord() {
+  //
+  // stageOverride: the auto-skip path (submitAnswer, below) calls this
+  // right after a response comes back but before setCurrent(parsed) has
+  // committed, so reading `current.stage` here would capture the stale,
+  // pre-response value. Passing the stage explicitly avoids depending on
+  // React state timing. The manual Skip button (no argument) doesn't
+  // have this problem, since `current` is already up to date whenever a
+  // student can see and click it.
+  function skipWord(stageOverride) {
     SFX.click();
     const revealText = `"${targetWord.word}" — ask your teacher to explain this one together!`;
     setDisplay((d) => [...d, { from: "coach", text: revealText, revealed: true }]);
@@ -2204,7 +2212,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
         word: targetWord.word,
         clueType: targetWord.clueType,
         concreteness: targetWord.concreteness,
-        finalStage: current ? current.stage : 1,
+        finalStage: stageOverride ?? (current ? current.stage : 1),
         hintsUsed: hintsUsedRef.current,
         funFact: null,
         revealedMeaning: revealText,
@@ -2290,8 +2298,9 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
           // This word has gone STUCK_WORD_LIMIT exchanges without
           // resolving; auto-reveal via the same free fallback Skip uses
           // rather than let a genuinely stuck student keep spending AI
-          // calls on a word that isn't landing.
-          skipWord();
+          // calls on a word that isn't landing. Pass parsed.stage
+          // explicitly, see the stageOverride comment on skipWord().
+          skipWord(parsed.stage || 1);
           return;
         }
         if (parsed.hint_given) { SFX.hint(); } else { SFX.correct(); }
