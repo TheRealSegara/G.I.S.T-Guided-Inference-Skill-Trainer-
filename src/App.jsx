@@ -1000,8 +1000,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
     setMakerText("");
     setMakerTitle("");
     setMakerResult(null);
-    setMakerWordCount(5);
-    setMakerWords(["", "", "", "", ""]);
+    setMakerWords(Array(SESSION_WORD_COUNT).fill(""));
     setMakerSaved(true);
   }
 
@@ -1590,14 +1589,30 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, avatar
     totalLogCount >= 5 ? { emoji: "🧭", title: "Trail Blazer", subtitle: "5+ words solved!" } : null;
 
   const highlightWords = (text, keyPrefix) => {
-    const parts = [];
-    let remaining = text;
-    let key = 0;
+    // Find every target word's actual position in this sentence first, then
+    // render left to right by that position, not by passage.words' array
+    // order. Custom (AI-generated) maps have no guarantee their words array
+    // is in textual order, e.g. two target words sharing one sentence can
+    // easily come back in either order, same for a teacher's typed word
+    // order in the level maker. Iterating in array order while slicing
+    // `remaining` sequentially meant a word appearing earlier in the text
+    // than an array-earlier word would search a `remaining` already sliced
+    // past its position, silently never match, and stay unhighlighted and
+    // untappable forever, softlocking that map.
+    const matches = [];
     passage.words.forEach((w) => {
-      const idx = remaining.toLowerCase().indexOf(w.word.toLowerCase());
-      if (idx === -1) return;
-      parts.push(<span key={`${keyPrefix}t${key++}`}>{remaining.slice(0, idx)}</span>);
-      const matched = remaining.slice(idx, idx + w.word.length);
+      const idx = text.toLowerCase().indexOf(w.word.toLowerCase());
+      if (idx !== -1) matches.push({ w, idx });
+    });
+    matches.sort((a, b) => a.idx - b.idx);
+
+    const parts = [];
+    let cursor = 0;
+    let key = 0;
+    matches.forEach(({ w, idx }) => {
+      if (idx < cursor) return; // overlapping match (e.g. one word contains another), skip
+      parts.push(<span key={`${keyPrefix}t${key++}`}>{text.slice(cursor, idx)}</span>);
+      const matched = text.slice(idx, idx + w.word.length);
       const solved = solvedWords.includes(w.word);
       parts.push(
         <button
@@ -1613,9 +1628,9 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, avatar
           {matched}
         </button>
       );
-      remaining = remaining.slice(idx + w.word.length);
+      cursor = idx + w.word.length;
     });
-    parts.push(<span key={`${keyPrefix}t${key++}`}>{remaining}</span>);
+    parts.push(<span key={`${keyPrefix}t${key++}`}>{text.slice(cursor)}</span>);
     return parts;
   };
 
@@ -2476,7 +2491,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
             </div>
             <div className="flex items-center gap-2 shrink-0 relative">
               <button
-                onClick={skipWord}
+                onClick={() => skipWord()}
                 disabled={loading || transferLoading}
                 className="flex items-center gap-1 font-body text-xs text-stone-500 bg-white rounded-full px-3 py-2.5 hover:text-stone-700 disabled:opacity-40"
                 style={{ border: "2px solid #d6d3d1" }}
