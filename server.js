@@ -31,13 +31,25 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
-app.all("/api/claude", (req, res) => {
-  claudeHandler(req, res);
-});
+// Both handlers are async functions; called bare like this, an exception
+// thrown after their first `await` becomes an unhandled promise
+// rejection, which crashes this entire process (verified: Node exits
+// immediately, taking down every other in-flight request on this
+// container, not just the one that errored). This wrapper guarantees any
+// unexpected failure — not just the specific ones each handler already
+// catches — ends in a clean response instead of an outage.
+function withErrorBoundary(handler) {
+  return (req, res) => {
+    Promise.resolve(handler(req, res)).catch((err) => {
+      console.error(err);
+      if (!res.headersSent) res.status(500).json({ error: "Internal server error" });
+    });
+  };
+}
 
-app.all("/api/auth", (req, res) => {
-  authHandler(req, res);
-});
+app.all("/api/claude", withErrorBoundary(claudeHandler));
+
+app.all("/api/auth", withErrorBoundary(authHandler));
 
 app.use(express.static(distDir));
 app.get("*", (req, res) => {
