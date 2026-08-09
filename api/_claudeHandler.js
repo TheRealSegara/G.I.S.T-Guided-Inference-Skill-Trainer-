@@ -10,7 +10,13 @@
 // changes: { content: [{ type: "text", text: "..." }] }.
 
 import { verifyToken } from "./_auth.js";
-import { isOriginAllowed, getClientIp, pruneIfLarge } from "./_shared.js";
+import { isOriginAllowed, getClientIp, pruneIfLarge, isPlainObjectWithOnlyKeys } from "./_shared.js";
+
+// The exact, complete shape callClaude() in App.jsx is allowed to send.
+// Anything outside this (extra top-level fields, extra fields on a
+// message) is rejected outright rather than silently ignored.
+const ALLOWED_BODY_KEYS = ["model", "system", "messages", "max_tokens"];
+const ALLOWED_MESSAGE_KEYS = ["role", "content"];
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 const GEMINI_URL = (model, key) =>
@@ -61,14 +67,15 @@ function isOverDailyQuota(label) {
 }
 
 function validateBody(body) {
-  if (!body || typeof body !== "object") return "Missing request body";
+  if (!isPlainObjectWithOnlyKeys(body, ALLOWED_BODY_KEYS)) return "Missing or unexpected fields in request body";
   if (body.model !== ALLOWED_MODEL) return "Unsupported model";
   if (typeof body.system !== "string" || body.system.length > MAX_SYSTEM_CHARS) return "Invalid system prompt";
   if (!Array.isArray(body.messages) || body.messages.length === 0 || body.messages.length > MAX_MESSAGES) {
     return "Invalid messages";
   }
   for (const m of body.messages) {
-    if (!m || (m.role !== "user" && m.role !== "assistant")) return "Invalid message role";
+    if (!isPlainObjectWithOnlyKeys(m, ALLOWED_MESSAGE_KEYS)) return "Unexpected fields in message";
+    if (m.role !== "user" && m.role !== "assistant") return "Invalid message role";
     if (typeof m.content !== "string" || m.content.length > MAX_MESSAGE_CHARS) return "Invalid message content";
   }
   if (body.max_tokens !== undefined && (typeof body.max_tokens !== "number" || !Number.isFinite(body.max_tokens) || body.max_tokens <= 0)) {

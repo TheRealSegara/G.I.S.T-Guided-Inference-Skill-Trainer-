@@ -9,7 +9,11 @@
 // protecting stored student data (the app stores nothing server-side).
 
 import { signToken } from "./_auth.js";
-import { isOriginAllowed, getClientIp, pruneIfLarge } from "./_shared.js";
+import { isOriginAllowed, getClientIp, pruneIfLarge, isPlainObjectWithOnlyKeys } from "./_shared.js";
+
+// The exact, complete shape the access-code screen in App.jsx is allowed
+// to send. Anything outside this is rejected outright, not ignored.
+const ALLOWED_BODY_KEYS = ["code"];
 
 const TOKEN_TTL_MINUTES = Number(process.env.TOKEN_TTL_MINUTES) || 720; // 12h: a school day plus margin
 const MAX_ATTEMPTS = 10;
@@ -70,7 +74,11 @@ export default async function authHandler(req, res) {
     return res.status(500).json({ error: "Server is missing ACCESS_CODES" });
   }
 
-  const submitted = typeof req.body?.code === "string" ? req.body.code.trim() : "";
+  if (!isPlainObjectWithOnlyKeys(req.body, ALLOWED_BODY_KEYS)) {
+    return res.status(400).json({ error: "Missing or unexpected fields in request body" });
+  }
+
+  const submitted = typeof req.body.code === "string" ? req.body.code.trim() : "";
   if (!submitted || submitted.length > 100) {
     return res.status(400).json({ error: "Missing access code" });
   }

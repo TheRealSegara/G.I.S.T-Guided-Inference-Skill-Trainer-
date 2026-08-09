@@ -35,6 +35,14 @@ G.I.S.T. doesn't have real user accounts, there's no database to hold them. Inst
 
 This protects your Gemini quota/cost from random internet traffic; it is **not** meant to protect sensitive data, since the app stores nothing server-side to begin with.
 
+## Rotating keys and secrets
+
+All three secret values (`GEMINI_API_KEY`, `AUTH_SECRET`, `ACCESS_CODES`) live only in Vercel's Environment Variables (or your host's equivalent) — rotating any of them is: generate/obtain a new value, update it there, redeploy. None of them are referenced anywhere else, so nothing else needs updating.
+
+- **`GEMINI_API_KEY`**: rotate immediately (delete the old key in AI Studio, generate a new one) if it's ever pasted into a chat, screenshot, commit, or anywhere outside Vercel's UI. Do this periodically regardless, as routine hygiene.
+- **`AUTH_SECRET`**: rotating it instantly invalidates every currently-issued access token, forcing everyone to re-enter their access code — harmless, since no session data is lost by design.
+- **`ACCESS_CODES`**: see step 4 above — just edit the list.
+
 ## Vercel Firewall rate-limit rule (recommended, dashboard-only)
 
 `middleware.js` and the in-memory limiter in `_claudeHandler.js` only go so far. For a real, globally-enforced cap, add a Vercel Firewall rule after your first deploy (free on the Hobby plan, 1 rule/project):

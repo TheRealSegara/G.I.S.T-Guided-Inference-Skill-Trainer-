@@ -43,3 +43,14 @@ export function pruneIfLarge(map, maxSize, isExpired) {
     if (isExpired(value)) map.delete(key);
   }
 }
+
+// True if obj is a plain, non-array object containing only keys present
+// in `allowedKeys`. Used to reject request bodies with extra/unexpected
+// fields (OWASP API3: mass assignment / excessive data exposure) instead
+// of silently ignoring fields the handler doesn't look at — an unused
+// field today is a foothold for a bug tomorrow if the body is ever
+// forwarded, logged, or spread into something else without this check.
+export function isPlainObjectWithOnlyKeys(obj, allowedKeys) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false;
+  return Object.keys(obj).every((k) => allowedKeys.includes(k));
+}
