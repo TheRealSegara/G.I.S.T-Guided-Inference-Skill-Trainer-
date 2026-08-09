@@ -32,20 +32,24 @@ const MAX_SYSTEM_CHARS = 12000;
 // Best-effort per-instance rate limit. Serverless instances are short-lived
 // and not shared, so this doesn't guarantee a global cap, but it stops a
 // single abusive client from hammering a warm instance. Vercel's Firewall
-// rate-limit rule (configured in the dashboard, see README) is the real
-// global backstop; this is a second, cheaper layer.
+// rate-limit rule (configured in the dashboard, see README) and Groq's own
+// account-wide limits are the real backstops; this is a cheap first layer
+// against obvious abuse, not a precise model of Groq's shared token budget.
 //
-// Set below (not at) llama-3.1-8b-instant's free-tier ceiling — no
-// billing account linked, verify your own live numbers at
-// console.groq.com/docs/rate-limits, they can differ by account. The raw
-// request ceiling is 30/minute, but the *token* ceiling (6,000/minute) is
-// what actually binds first for this app: a single coach turn's system
-// prompt alone runs ~1,800-1,900 tokens, so in practice only about 3 calls
-// fit in a minute before Groq's own token-rate error would show up
-// instead of ours. Set here to stay under that, not the higher-looking
-// but less relevant request count.
+// Deliberately looser than a strict division of Groq's 6,000-tokens/minute
+// ceiling by this app's ~1,800-1,900-token coach calls would suggest
+// (~3/minute) — confirmed live that setting was too tight: normal single-
+// student play routinely stacks more than 3 real calls inside one minute
+// (a wrong answer needing a hint, an occasional JSON-repair retry, the
+// transfer test firing right after resolution), tripping our own message
+// during completely ordinary use, not abuse. A per-IP counter isn't the
+// right tool for precisely policing a token budget that's actually shared
+// account-wide across every concurrent student anyway; that's what Groq's
+// own real error and the Vercel Firewall rule are for. This just catches
+// an obviously runaway client. Verify your own live numbers at
+// console.groq.com/docs/rate-limits if tuning this further.
 const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 3;
+const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 10;
 const requestLog = new Map();
 
 // Per-access-code daily quota, keyed by the label embedded in the token
