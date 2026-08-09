@@ -13,20 +13,35 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, "dist");
 
 const app = express();
-// Trust exactly one hop (the host's own load balancer/reverse proxy, e.g.
-// Cloud Run's) so req.ip resolves the real client IP instead of a raw,
-// client-suppliable X-Forwarded-For value. Used as a fallback by
-// getClientIp() in api/_shared.js when Vercel's x-real-ip isn't present.
-app.set("trust proxy", 1);
+// Only trust X-Forwarded-For if explicitly told to, and only trust the
+// number of hops actually configured. Defaulting to trusting a hop
+// unconditionally was verified to let a client bypass both the per-IP
+// rate limiter and /api/auth's brute-force guard just by sending a
+// fresh X-Forwarded-For value on every request, since Express then
+// trusts that header at face value with no real proxy required to be
+// there setting it. Safe default here is trusting nothing (falls back
+// to the raw socket address, un-spoofable). Set TRUST_PROXY_HOPS to the
+// exact number of trusted reverse-proxy hops in front of this process
+// (usually 1) only on a host, like Cloud Run, where that's actually
+// true and the app isn't otherwise directly reachable.
+if (process.env.TRUST_PROXY_HOPS) {
+  app.set("trust proxy", Number(process.env.TRUST_PROXY_HOPS));
+}
 app.use(express.json({ limit: "1mb" }));
 // Without this, Express's default error handler returns a raw stack
 // trace (including absolute file paths on the server) to the client for
-// malformed JSON bodies. Vercel's serverless functions don't have this
-// problem (the platform parses/rejects bad JSON itself), but server.js
-// needs its own handling.
+// any body-parsing failure. Vercel's serverless functions don't have
+// this problem (the platform parses/rejects bad bodies itself), but
+// server.js needs its own handling. Deliberately generic (any body-
+// parser error, identified by a sub-500 status code already set by
+// body-parser/raw-body) rather than special-casing just SyntaxError:
+// an oversized body throws a distinct PayloadTooLargeError (413), not a
+// SyntaxError, and was confirmed to leak a full stack trace + absolute
+// server file paths before this was broadened to cover it too.
 app.use((err, req, res, next) => {
-  if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
-    return res.status(400).json({ error: "Invalid JSON body" });
+  if (err && typeof err.status === "number" && err.status >= 400 && err.status < 500) {
+    const message = err.type === "entity.too.large" ? "Request body too large" : "Invalid request body";
+    return res.status(err.status).json({ error: message });
   }
   next(err);
 });

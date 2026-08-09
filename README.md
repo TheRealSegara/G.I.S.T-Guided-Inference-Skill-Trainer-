@@ -107,6 +107,7 @@ Container-based hosts don't run per-file serverless functions the way Vercel doe
 1. Set `GEMINI_API_KEY` and `ALLOWED_ORIGINS` as environment variables/secrets in the host's project settings (in Google AI Studio's case, this may already be wired up automatically from your Google account, since it issues the free key itself).
 2. The host should run `npm install`, then `npm run build` (or the `gcp-build` script, which does the same thing, some GCP buildpacks run this automatically), then `npm start` (`node server.js`). If the host lets you set a build/start command explicitly, use those.
 3. If a deploy fails with something like "container failed to start and listen on the port", it means the host isn't running `npm start`, double check the build/start command configuration rather than the app code.
+4. Only set `TRUST_PROXY_HOPS=1` if this container sits behind the host's own reverse proxy/load balancer (true for Cloud Run). Leave it unset on any host where the process might be reachable directly, otherwise a client can fake their own IP via the `X-Forwarded-For` header and slip past the rate limiter and the access-code brute-force guard.
 
 ## Project structure
 
