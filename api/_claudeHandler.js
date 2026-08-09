@@ -159,16 +159,6 @@ export default async function claudeHandler(req, res) {
         systemInstruction: { parts: [{ text: req.body.system }] },
         generationConfig: {
           maxOutputTokens: Math.min(req.body.max_tokens || MAX_TOKENS_CAP, MAX_TOKENS_CAP),
-          // Every prompt in this app is a tightly-specified JSON-formatting
-          // task with an explicit rulebook (stage logic, hint boundaries,
-          // exact schema), not open-ended reasoning, so the model doesn't
-          // need its default "thinking" phase, extra hidden tokens generated
-          // sequentially before the real answer, adding real latency. Set to
-          // 0 to skip straight to the answer. If a future GEMINI_MODEL
-          // doesn't support this field, Gemini's own error message will say
-          // so immediately (visible client-side), the safe rollback is
-          // deleting this one field.
-          thinkingConfig: { thinkingBudget: 0 },
         },
       }),
     });
