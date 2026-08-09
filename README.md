@@ -6,6 +6,14 @@ G.I.S.T. asks students to work out unfamiliar words directly from context, guide
 
 Built for the Petrosains AI Educator Challenge 2026.
 
+## For teachers: what this actually is
+
+You don't need to read the rest of this file to understand the project — it's here for anyone deploying or maintaining it.
+
+G.I.S.T. is a short, guided activity a student plays on a tablet or laptop, with a teacher nearby. The student picks a reading passage; an AI "coach" (one of eight animal characters) walks them through 3–5 tricky vocabulary words, one at a time, always making them work the meaning out from context, never just telling them the answer. Afterward, you (the teacher) get a plain-language report: which words the student genuinely understood, which they only guessed at, and one concrete thing to try in your next lesson — no jargon, no dashboards to interpret.
+
+**Wanting to try it with your own class?** You don't need to set any of this up yourself — ask whoever manages the deployed link for your class's access code, then just open the link on a device and go. If you're interested in running your *own* copy (a different school, your own Google account, full control over it), everything below is what a technical setup helper would need — it's more detail than a teacher needs day-to-day, but it's what makes it possible for someone else to stand up their own instance.
+
 ## AI calls run through a server-side proxy
 
 Every AI feature in this app, coaching dialogue, the diagnostic report, the level maker, the comprehension question, calls a single function, `callClaude()` in `src/App.jsx`, which posts to `/api/claude`. That endpoint is a Vercel serverless function (`api/claude.js`) that holds a real API key server-side and forwards the request to the upstream model. The key is never sent to the browser.
