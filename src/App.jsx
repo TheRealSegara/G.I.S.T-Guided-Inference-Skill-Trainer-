@@ -845,7 +845,7 @@ const BigButton = ({ children, onClick, disabled, variant = "solid", className =
   const base = "font-display font-800 text-sm px-6 py-3 rounded-full transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed active:translate-y-1 active:scale-95";
   const variantStyles = {
     solid: { background: "linear-gradient(180deg,#fbbf24,#d97706)", color: "white", boxShadow: "0 5px 0 0 #92400e" },
-    outline: { background: "white", color: "#059669", border: "3px solid #34d399", boxShadow: "0 4px 0 0 #a7f3d0" },
+    outline: { background: "white", color: "#047857", border: "3px solid #34d399", boxShadow: "0 4px 0 0 #a7f3d0" },
     ghost: { background: "transparent", color: "#78716c", boxShadow: "none" },
   };
   return (
@@ -1046,7 +1046,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
           >
             <span className="text-3xl shrink-0">{a.emoji}</span>
             <p className="font-display font-800 text-sm" style={{ color: persona?.color?.text }}>{persona?.name || a.label}</p>
-            <p className="font-body text-[10px] leading-snug" style={{ color: persona?.color?.text, opacity: 0.75 }}>{persona?.description || a.label}</p>
+            <p className="font-body text-[10px] leading-snug" style={{ color: persona?.color?.text }}>{persona?.description || a.label}</p>
           </button>
         );
       })}
@@ -1092,7 +1092,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
 
             {/* Teacher panel */}
             <div className="p-8 flex flex-col items-center text-center rounded-2xl" style={{ background: "#F1EFEA" }}>
-              <p className="font-display font-800 text-sm uppercase tracking-wide text-stone-500 mb-2">For Teachers</p>
+              <p className="font-display font-800 text-sm uppercase tracking-wide text-stone-600 mb-2">For Teachers</p>
               <span className="text-5xl mb-3">🧑‍🏫</span>
               <p className="font-body text-sm text-stone-600 leading-relaxed mb-5 max-w-[240px]">
                 Paste any passage and G.I.S.T. picks the target words for you, ready in under a minute for your student to play.
@@ -1103,7 +1103,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
               {onViewDemoReport && (
                 <button
                   onClick={() => { SFX.tap(); onViewDemoReport(); }}
-                  className="mt-3 font-body text-xs text-stone-400 underline hover:text-stone-600"
+                  className="mt-3 font-body text-xs text-stone-600 underline hover:text-stone-800"
                 >
                   🔦 See a sample report
                 </button>
@@ -1161,7 +1161,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
             {(() => {
               const wc = makerText.trim() ? makerText.trim().split(/\s+/).length : 0;
               const good = wc >= 80 && wc <= 150;
-              const color = wc === 0 ? "text-stone-400" : good ? "text-emerald-600" : "text-amber-600";
+              const color = wc === 0 ? "text-stone-500" : good ? "text-emerald-600" : "text-amber-600";
               return (
                 <p className={`font-body text-[11px] mb-4 text-right ${color}`}>
                   {wc} word{wc === 1 ? "" : "s"} {wc > 0 && !good && (wc < 80 ? "· a bit short, aim for 80-150" : "· a bit long, aim for 80-150")}
@@ -1179,7 +1179,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
             </div>
 
             <label className="font-display font-700 text-xs uppercase tracking-wide text-amber-700 block mb-1">Words to highlight (optional)</label>
-            <p className="font-body text-[11px] text-stone-400 mb-2">Pick specific words yourself, or leave any box blank and the AI will choose good ones for you.</p>
+            <p className="font-body text-[11px] text-stone-500 mb-2">Pick specific words yourself, or leave any box blank and the AI will choose good ones for you.</p>
             <div className="grid gap-2 mb-4" style={{ gridTemplateColumns: `repeat(${SESSION_WORD_COUNT}, minmax(0, 1fr))` }}>
               {makerWords.map((w, i) => (
                 <input
@@ -1326,7 +1326,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
             <span className="text-3xl">🐾</span>
             <div>
               <h1 className="font-display font-800 text-xl text-stone-700 leading-tight">Pick your animal companion</h1>
-              <p className="font-body text-xs text-stone-400">This animal will be your coach for the whole adventure</p>
+              <p className="font-body text-xs text-stone-500">This animal will be your coach for the whole adventure</p>
             </div>
           </div>
           <CompanionGrid selected={avatarConfig.companion} onSelect={(id) => setAvatarConfig((c) => ({ ...c, companion: id }))} />
@@ -1408,7 +1408,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                   />
                 ))}
               </div>
-              <p className="font-hand text-xl text-stone-400 text-center mt-6">{BADGE_COLORS.find((b) => b.id === avatarConfig.badge)?.label}</p>
+              <p className="font-hand text-xl text-stone-500 text-center mt-6">{BADGE_COLORS.find((b) => b.id === avatarConfig.badge)?.label}</p>
             </div>
 
             <div className="bg-white p-6 flex flex-col flex-1 justify-center" style={KID_CARD}>
@@ -1428,7 +1428,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                   </button>
                 ))}
               </div>
-              <p className="font-hand text-sm text-stone-400 text-center mt-2">{ACCESSORY_STICKERS.find((a) => a.id === avatarConfig.accessory)?.label}</p>
+              <p className="font-hand text-sm text-stone-500 text-center mt-2">{ACCESSORY_STICKERS.find((a) => a.id === avatarConfig.accessory)?.label}</p>
             </div>
           </div>
 
@@ -1449,7 +1449,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
             <span className="text-3xl">🗺️</span>
             <div>
               <h1 className="font-display font-800 text-xl text-stone-700 leading-tight">Choose your map</h1>
-              <p className="font-body text-xs text-stone-400">Pick where your adventure happens today</p>
+              <p className="font-body text-xs text-stone-500">Pick where your adventure happens today</p>
             </div>
           </div>
 
@@ -1474,7 +1474,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                   <span className="text-3xl shrink-0">{p.emoji}</span>
                   <div>
                     <p className="font-display font-800 text-sm" style={{ color: theme.text }}>{p.title}</p>
-                    <p className="font-body text-[10px] leading-snug" style={{ color: theme.text, opacity: 0.75 }}>{SESSION_WORD_COUNT} tricky words{id.startsWith("custom-") ? " · custom" : ""}</p>
+                    <p className="font-body text-[10px] leading-snug" style={{ color: theme.text }}>{SESSION_WORD_COUNT} tricky words{id.startsWith("custom-") ? " · custom" : ""}</p>
                   </div>
                 </button>
               );
@@ -1658,7 +1658,7 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, avatar
           <button
             key={i}
             onClick={() => { SFX.pageTurn(); onRevealNext(); }}
-            className="w-full text-left mb-3 px-4 py-3 rounded-xl bg-stone-100 hover:bg-stone-200 transition-all font-hand text-lg text-stone-400 italic step-in"
+            className="w-full text-left mb-3 px-4 py-3 rounded-xl bg-stone-100 hover:bg-stone-200 transition-all font-hand text-lg text-stone-600 italic step-in"
             style={{ breakInside: "avoid" }}
           >
             🔒 tap to reveal the next part of the story…
@@ -2045,7 +2045,7 @@ function WordBankWidget({ tiles, onSubmit }) {
   return (
     <div className="step-in">
       <div className="flex items-center justify-center gap-1.5 mb-4 min-h-[3.25rem] flex-wrap">
-        {used.length === 0 && <span className="font-hand text-stone-400 text-lg">tap the letters below...</span>}
+        {used.length === 0 && <span className="font-hand text-stone-500 text-lg">tap the letters below...</span>}
         {used.map((i, idx) => (
           <span
             key={idx}
@@ -2113,7 +2113,7 @@ function LetterConnectWidget({ tiles, onSubmit }) {
   return (
     <div className="step-in flex flex-col items-center">
       <div className="mb-3 min-h-[2.75rem] flex items-center justify-center flex-wrap gap-1">
-        {used.length === 0 && <span className="font-hand text-stone-400 text-lg">connect the letters below...</span>}
+        {used.length === 0 && <span className="font-hand text-stone-500 text-lg">connect the letters below...</span>}
         {used.map((i, idx) => (
           <span
             key={idx}
@@ -2487,7 +2487,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
               <h1 className="font-display text-2xl sm:text-3xl font-800 text-stone-700 leading-tight">"{targetWord.word}"</h1>
-              <p className="font-hand text-base sm:text-lg text-orange-500 leading-tight">{(COMPANION_PERSONAS[avatarConfig.companion] || COMPANION_PERSONAS.parrot).name} is tracking this word with you!</p>
+              <p className="font-hand text-base sm:text-lg text-orange-700 leading-tight">{(COMPANION_PERSONAS[avatarConfig.companion] || COMPANION_PERSONAS.parrot).name} is tracking this word with you!</p>
             </div>
             <div className="flex items-center gap-2 shrink-0 relative">
               <button
@@ -2536,13 +2536,13 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
           </div>
 
           <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-stone-100">
-            <p className="font-display font-700 text-sm uppercase tracking-wide text-stone-400">
+            <p className="font-display font-700 text-sm uppercase tracking-wide text-stone-600">
               {wordDone ? "Word complete!" : prePhase === "prior" ? "Getting ready…" : `Stage ${stageReached} of 5`}
             </p>
             <StageTracker />
           </div>
           {pacingElapsed > 60 && !wordDone && (
-            <p className="font-body text-[11px] text-stone-400 text-center mt-2 step-in">⏱ Taking a bit longer than usual, that's okay!</p>
+            <p className="font-body text-[11px] text-stone-500 text-center mt-2 step-in">⏱ Taking a bit longer than usual, that's okay!</p>
           )}
         </div>
 
@@ -2633,7 +2633,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                 <div className="flex justify-start items-end gap-1.5">
                   <span className="text-xl sm:text-2xl shrink-0 mb-1">{companionEmoji}</span>
                   <div className="px-5 py-3.5 rounded-2xl bg-sky-50 border-2 border-sky-200">
-                    <p className="font-hand text-lg text-stone-400">{(COMPANION_PERSONAS[avatarConfig.companion] || COMPANION_PERSONAS.parrot).name} is thinking… 🤔</p>
+                    <p className="font-hand text-lg text-stone-500">{(COMPANION_PERSONAS[avatarConfig.companion] || COMPANION_PERSONAS.parrot).name} is thinking… 🤔</p>
                   </div>
                 </div>
               )}
@@ -2662,7 +2662,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                       {raw.split(new RegExp(`(${targetWord.word})`, "i")).map((part, i) =>
                         part.toLowerCase() === targetWord.word.toLowerCase() ? (
                           blank ? (
-                            <strong key={i} className="text-stone-400 not-italic tracking-widest">▬▬▬▬▬</strong>
+                            <strong key={i} className="text-stone-500 not-italic tracking-widest">▬▬▬▬▬</strong>
                           ) : (
                             <strong key={i} className="text-amber-700 not-italic font-800">{part}</strong>
                           )
@@ -2832,7 +2832,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
               {postPhase === "transfer" && (
                 <div className="step-in">
                   {transferLoading && (
-                    <p className="font-hand text-2xl text-stone-400 text-center py-4">One more check, a brand-new sentence… 🧭</p>
+                    <p className="font-hand text-2xl text-stone-500 text-center py-4">One more check, a brand-new sentence… 🧭</p>
                   )}
                   {!transferLoading && transferData && transferPassed === null && (
                     <>
@@ -3111,7 +3111,7 @@ function ComprehensionScreen({ passage, avatarConfig, onDone }) {
             <AvatarDisplay config={avatarConfig} size={44} />
           </div>
           <h1 className="font-display text-2xl sm:text-3xl font-800 text-stone-700 leading-tight">📖 One Last Check</h1>
-          <p className="font-hand text-base sm:text-lg text-orange-500 leading-tight">Did you follow the whole story, {passage.title}?</p>
+          <p className="font-hand text-base sm:text-lg text-orange-700 leading-tight">Did you follow the whole story, {passage.title}?</p>
         </div>
 
         {/* Single unified box, matching CoachScreen */}
@@ -3123,7 +3123,7 @@ function ComprehensionScreen({ passage, avatarConfig, onDone }) {
             <div className="flex justify-start items-end gap-1.5 step-in">
               <span className="text-xl sm:text-2xl shrink-0 mb-1">{companionEmoji}</span>
               <div className="px-5 py-3.5 rounded-2xl bg-sky-50 border-2 border-sky-200">
-                <p className="font-hand text-lg text-stone-400">{companion.name} is thinking of a question… 🧭</p>
+                <p className="font-hand text-lg text-stone-500">{companion.name} is thinking of a question… 🧭</p>
               </div>
             </div>
           )}
@@ -3226,7 +3226,7 @@ function RecapScreen({ studentId, log, avatarConfig, comprehensionResult, onFini
         <h1 className="font-display font-800 text-3xl text-stone-700 mt-2 mb-1">
           Great adventure, {studentId}!
         </h1>
-        <p className="font-hand text-xl text-orange-500 mb-6">
+        <p className="font-hand text-xl text-orange-700 mb-6">
           Here's what you got good at today
         </p>
 
@@ -3351,7 +3351,7 @@ function TourScreen({ avatarConfig, passage, onDone, bilingual, onToggleBilingua
   const Bi = ({ en, ms, className = "font-body text-base text-stone-600 leading-relaxed" }) => (
     <p className={className}>
       {en}
-      {bilingual && ms && <span className="block font-body text-stone-400 mt-1" style={{ fontSize: "0.78em" }}>{ms}</span>}
+      {bilingual && ms && <span className="block font-body text-stone-500 mt-1" style={{ fontSize: "0.78em" }}>{ms}</span>}
     </p>
   );
 
@@ -3374,7 +3374,7 @@ function TourScreen({ avatarConfig, passage, onDone, bilingual, onToggleBilingua
               <p className="font-display font-800 text-[9px] uppercase tracking-wide text-stone-500 mb-0.5">{companion.name}</p>
               <p className="font-body text-xs sm:text-sm text-stone-700">
                 Let's figure out what this word means together!
-                {bilingual && <span className="block text-stone-400 mt-0.5" style={{ fontSize: "0.85em" }}>Jom kita fikirkan bersama apa maksud perkataan ini!</span>}
+                {bilingual && <span className="block text-stone-500 mt-0.5" style={{ fontSize: "0.85em" }}>Jom kita fikirkan bersama apa maksud perkataan ini!</span>}
               </p>
             </div>
           </div>
@@ -3408,7 +3408,7 @@ function TourScreen({ avatarConfig, passage, onDone, bilingual, onToggleBilingua
             {!revealDemo ? (
               <button
                 onClick={() => { SFX.pageTurn(); setRevealDemo(true); }}
-                className="w-full text-left px-3 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 transition-all font-hand text-xs text-stone-400 italic"
+                className="w-full text-left px-3 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 transition-all font-hand text-xs text-stone-600 italic"
               >
                 🔒 tap to reveal the next part…
               </button>
@@ -3514,7 +3514,7 @@ function TourScreen({ avatarConfig, passage, onDone, bilingual, onToggleBilingua
           {practiceAnswer && (
             <p className="font-hand text-base text-teal-600 mt-3 text-center step-in">
               Nice! That's exactly how it'll feel when you play for real.
-              {bilingual && <span className="block font-body text-stone-400 mt-1" style={{ fontSize: "0.7em" }}>Bagus! Begitulah rasanya apabila anda bermain nanti.</span>}
+              {bilingual && <span className="block font-body text-stone-500 mt-1" style={{ fontSize: "0.7em" }}>Bagus! Begitulah rasanya apabila anda bermain nanti.</span>}
             </p>
           )}
         </div>
@@ -3598,8 +3598,8 @@ function TourScreen({ avatarConfig, passage, onDone, bilingual, onToggleBilingua
             style={{ border: "3px solid #b45309", boxShadow: "0 3px 0 0 #92400e" }}
             title={bilingual ? "Turn off Bahasa Malaysia support" : "Turn on Bahasa Malaysia support"}
           >
-            <span className={`px-2.5 py-1.5 ${!bilingual ? "bg-amber-400 text-white" : "text-stone-400"}`}>EN</span>
-            <span className={`px-2.5 py-1.5 ${bilingual ? "bg-amber-400 text-white" : "text-stone-400"}`}>BM</span>
+            <span className={`px-2.5 py-1.5 ${!bilingual ? "bg-amber-400 text-amber-900" : "text-stone-500"}`}>EN</span>
+            <span className={`px-2.5 py-1.5 ${bilingual ? "bg-amber-400 text-amber-900" : "text-stone-500"}`}>BM</span>
           </button>
         )}
 
@@ -3618,7 +3618,7 @@ function TourScreen({ avatarConfig, passage, onDone, bilingual, onToggleBilingua
         <span className="text-5xl">{current.emoji}</span>
         <h1 className="font-display font-800 text-2xl text-stone-700 mt-2 mb-4">
           {current.title}
-          {bilingual && current.titleMs && <span className="block font-body font-400 text-base text-stone-400 mt-0.5">{current.titleMs}</span>}
+          {bilingual && current.titleMs && <span className="block font-body font-400 text-base text-stone-500 mt-0.5">{current.titleMs}</span>}
         </h1>
 
         <div className="min-h-[200px] flex flex-col justify-center mb-6">{current.body}</div>
@@ -3763,7 +3763,7 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
           that reaches TeacherScreen (both a real post-session report and
           the sample report from the main menu). */}
       <div className="flex items-center justify-between mb-6 flex-wrap gap-2 relative z-10 pl-14 pr-14">
-        <button onClick={onBack} className="flex items-center gap-1 font-display font-700 text-xs text-stone-400 hover:text-stone-600 bg-white rounded-full px-3 py-1.5 border-2 border-stone-200">
+        <button onClick={onBack} className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-2 border-stone-200">
           <ChevronLeft className="w-3.5 h-3.5" /> Back
         </button>
         <div className="flex items-center gap-2">
@@ -3924,13 +3924,13 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
               </thead>
               <tbody>
                 {log.length === 0 && (
-                  <tr><td colSpan={showMapColumn ? 5 : 4} className="px-4 py-8 text-center font-hand text-lg text-stone-400">No words logged yet. Have the student solve a few words first!</td></tr>
+                  <tr><td colSpan={showMapColumn ? 5 : 4} className="px-4 py-8 text-center font-hand text-lg text-stone-500">No words logged yet. Have the student solve a few words first!</td></tr>
                 )}
                 {log.map((entry, i) => (
                   <tr key={i} className={`border-b border-amber-100 last:border-0 ${entry.skipped ? "bg-rose-50" : ""}`}>
                     <td className="px-4 py-3 font-display font-700 text-stone-700">
                       {entry.word}
-                      {entry.skipped && <span className="ml-2 font-body font-700 text-[10px] uppercase text-rose-600 bg-rose-100 px-2 py-0.5 rounded-full">Skipped</span>}
+                      {entry.skipped && <span className="ml-2 font-body font-700 text-[10px] uppercase text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full">Skipped</span>}
                     </td>
                     {showMapColumn && <td className="px-4 py-3 font-body text-xs text-stone-600">{entry.passageTitle || "—"}</td>}
                     <td className="px-4 py-3 font-body text-xs text-stone-600 capitalize">{entry.clueType}</td>
@@ -3945,7 +3945,7 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
       })()}
 
       <div className="mt-10 pt-6 border-t-2 border-stone-200 flex items-center justify-between flex-wrap gap-2 relative z-10">
-        <p className="font-body text-[11px] text-stone-400">Clears this session's log. Print or save your results first if you need them.</p>
+        <p className="font-body text-[11px] text-stone-500">Clears this session's log. Print or save your results first if you need them.</p>
         <BigButton variant="ghost" onClick={onReset}>
           <RotateCcw className="inline w-3 h-3 mr-1" /> Clear session
         </BigButton>
@@ -3992,8 +3992,8 @@ function AccessGateScreen({ onUnlocked }) {
         <h1 className="font-display text-6xl font-800 sticker-title mb-1">G.I.S.T.</h1>
       </div>
       <div className="relative z-10 bg-white p-8" style={DECKLE}>
-        <p className="font-display font-800 text-sm uppercase tracking-wide text-stone-500 mb-2 text-center">Access Code</p>
-        <p className="font-body text-sm text-stone-600 leading-relaxed mb-5 text-center">
+        <p className="font-display font-800 text-sm uppercase tracking-wide text-stone-600 mb-2 text-center">Access Code</p>
+        <p className="font-body text-sm text-stone-700 leading-relaxed mb-5 text-center">
           Ask your teacher or school for the code to unlock G.I.S.T.
         </p>
         <input
@@ -4004,7 +4004,7 @@ function AccessGateScreen({ onUnlocked }) {
           autoComplete="off"
           spellCheck={false}
           autoFocus
-          className="w-full bg-amber-50 rounded-2xl border-2 border-amber-300 px-4 py-4 font-body text-xl text-stone-700 text-center focus:outline-none focus:border-amber-500 placeholder:text-stone-400"
+          className="w-full bg-amber-50 rounded-2xl border-2 border-amber-300 px-4 py-4 font-body text-xl text-stone-700 text-center focus:outline-none focus:border-amber-500 placeholder:text-stone-500"
         />
         {error && <p className="font-body text-xs text-red-600 text-center mt-3" aria-live="polite">{error}</p>}
         <div className="flex justify-center mt-6">
