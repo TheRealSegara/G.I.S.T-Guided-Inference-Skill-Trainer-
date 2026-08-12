@@ -940,6 +940,12 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
   const [studentId, setStudentId] = useState("");
   const [avatarConfig, setAvatarConfig] = useState(DEFAULT_AVATAR_CONFIG);
   const [passageId, setPassageId] = useState(null);
+  // Where the tour should send the student when they finish it: into the
+  // name/avatar/passage wizard right after "Start Playing" (first-time
+  // flow), or back to the main menu (a returning student replaying it on
+  // demand from "How to play"). Tracked separately from `mode` since both
+  // entry points land on the same mode === "tour" screen.
+  const [afterTour, setAfterTour] = useState("wizard");
 
   // Unknown status (null, e.g. localStorage unavailable) fails open:
   // better to let a session start than block on missing information we
@@ -1122,9 +1128,15 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
               <p className="font-body text-sm text-stone-600 leading-relaxed mb-5 max-w-[220px]">
                 Choose a map and work through the words with your coach, tapping, spelling, and typing your way to each answer.
               </p>
-              <BigButton onClick={() => { setMode("play"); setStep(1); }}>
+              <BigButton onClick={() => { setAfterTour("wizard"); setStep(1); setMode("tour"); }}>
                 <Play className="inline w-4 h-4 mr-1.5 fill-current" /> Start Playing
               </BigButton>
+              <button
+                onClick={() => { SFX.tap(); setAfterTour("menu"); setMode("tour"); }}
+                className="mt-3 font-body text-xs text-stone-500 underline hover:text-stone-700"
+              >
+                ❓ How to play (see the tutorial again)
+              </button>
             </div>
 
             {/* Divider */}
@@ -1315,15 +1327,17 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
     );
   }
 
-  /* -------- First-time tour, shown after setup is complete, right before play begins -------- */
+  /* -------- Tutorial: shown right after "Start Playing" (before the setup
+     wizard), or on demand via "How to play" for a returning student -------- */
   if (mode === "tour") {
     return (
       <TourScreen
         avatarConfig={avatarConfig}
-        passage={allPassages[passageId]}
-        onDone={() => onBegin(studentId.trim(), avatarConfig, passageId, SESSION_WORD_COUNT)}
+        passage={passageId ? allPassages[passageId] : null}
+        onDone={() => (afterTour === "menu" ? setMode(null) : setMode("play"))}
         bilingual={bilingual}
         onToggleBilingual={onToggleBilingual}
+        standalone={afterTour === "menu"}
       />
     );
   }
@@ -1541,7 +1555,10 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
             <BigButton variant="ghost" onClick={() => setStep(3)}>
               <ChevronLeft className="inline w-4 h-4 mr-1" /> Back
             </BigButton>
-            <BigButton onClick={() => passageId && setMode("tour")} disabled={!passageId || !canAffordSession}>
+            <BigButton
+              onClick={() => passageId && onBegin(studentId.trim(), avatarConfig, passageId, SESSION_WORD_COUNT)}
+              disabled={!passageId || !canAffordSession}
+            >
               Start my adventure <ArrowRight className="inline w-4 h-4 ml-1" />
             </BigButton>
           </div>
@@ -3501,13 +3518,12 @@ const SAMPLE_COMPREHENSION = {
   correctAnswer: "It could open doors by itself",
 };
 
-function TourScreen({ avatarConfig, passage, onDone, bilingual, onToggleBilingual }) {
+function TourScreen({ avatarConfig, passage, onDone, bilingual, onToggleBilingual, standalone = false }) {
   const [page, setPage] = useState(0);
   const [revealDemo, setRevealDemo] = useState(false);
   const [practiceAnswer, setPracticeAnswer] = useState(null);
   const companion = COMPANION_PERSONAS[avatarConfig.companion] || COMPANION_PERSONAS.parrot;
   const companionEmoji = ANIMAL_COMPANIONS.find((c) => c.id === avatarConfig.companion)?.emoji || "🦜";
-  const totalPages = 7;
 
   const practiceData = {
     sentence: "The lion was very fierce and roared loudly.",
@@ -3753,6 +3769,25 @@ function TourScreen({ avatarConfig, passage, onDone, bilingual, onToggleBilingua
     },
   ];
 
+  // The first-time flow shows the tour before the name/avatar/story wizard,
+  // so it needs one more page bridging into that setup instead of straight
+  // into gameplay. A replay from "How to play" skips this, it just ends.
+  if (!standalone) {
+    pages.push({
+      emoji: "🎒",
+      title: "Ready to set up your adventure!",
+      titleMs: "Sedia untuk sediakan pengembaraan anda!",
+      body: (
+        <Bi
+          en="Next, you'll pick your name, choose your animal coach, and pick a story to explore."
+          ms="Seterusnya, pilih nama anda, pilih jurulatih haiwan anda, dan pilih cerita untuk diterokai."
+          className="font-body text-base text-stone-600 leading-relaxed"
+        />
+      ),
+    });
+  }
+
+  const totalPages = pages.length;
   const current = pages[page];
 
   return (
@@ -3811,7 +3846,7 @@ function TourScreen({ avatarConfig, passage, onDone, bilingual, onToggleBilingua
             </BigButton>
           ) : (
             <BigButton onClick={onDone}>
-              Let's start! <ArrowRight className="inline w-4 h-4 ml-1" />
+              {standalone ? "Got it!" : "Let's start!"} <ArrowRight className="inline w-4 h-4 ml-1" />
             </BigButton>
           )}
         </div>
