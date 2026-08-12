@@ -1655,6 +1655,25 @@ function ProgressTrail({ words, solvedWords, avatarConfig, totalMilestone }) {
 }
 
 /* ---------------- Passage Screen ---------------- */
+// White-to-charcoal progression for not-yet-reachable passage sentences,
+// so a glance at the stack of placeholders shows how much story is still
+// ahead: near-white right after the revealable one, darkening toward the
+// very last sentence. Each {bg, text} pair is pre-checked at 4.5:1+
+// contrast (WCAG AA) rather than interpolated live, so a middle shade in
+// the gradient can't accidentally land on a low-contrast combination.
+const UNREVEALED_SHADES = [
+  { bg: "#f5f5f4", text: "#57534e" },
+  { bg: "#d6d3d1", text: "#44403c" },
+  { bg: "#a8a29e", text: "#1c1917" },
+  { bg: "#78716c", text: "#ffffff" },
+  { bg: "#44403c", text: "#fafaf9" },
+];
+
+function unrevealedShade(t) {
+  const idx = Math.round(t * (UNREVEALED_SHADES.length - 1));
+  return UNREVEALED_SHADES[Math.max(0, Math.min(UNREVEALED_SHADES.length - 1, idx))];
+}
+
 function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, avatarConfig, totalLogCount, streakMsg, studentId, log, sessionStartedAt, revealedCount, onRevealNext }) {
   const milestone =
     totalLogCount >= 20 ? { emoji: "🏆", title: "Legendary Explorer", subtitle: "20+ words solved!" } :
@@ -1738,7 +1757,24 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, avatar
           </button>
         );
       }
-      return null;
+      // Sentences further ahead than the next revealable one: shown as a
+      // placeholder (not left blank) so the passage box is already at its
+      // full final height from the start, instead of visibly growing every
+      // time a part gets revealed. Darkens the further away it is.
+      const totalUpcoming = sentences.length - (revealedCount + 1);
+      const posAmongUpcoming = i - (revealedCount + 1);
+      const t = totalUpcoming > 1 ? posAmongUpcoming / (totalUpcoming - 1) : 0;
+      const shade = unrevealedShade(t);
+      return (
+        <div
+          key={i}
+          aria-hidden="true"
+          className="w-full mb-3 px-4 py-3 rounded-xl font-hand text-base italic step-in"
+          style={{ background: shade.bg, color: shade.text, breakInside: "avoid" }}
+        >
+          This part of the story isn't currently available.
+        </div>
+      );
     });
   };
 
@@ -2277,6 +2313,25 @@ function ThinkingDots({ label }) {
   );
 }
 
+// Groups CoachScreen's flat message list into one entry per stage "slide",
+// so the UI can show one stage at a time instead of a long scrolling
+// transcript that crowds out readability. A new slide starts whenever a
+// coach message reports a different stage than the current slide; the
+// student's own replies (no stage of their own) and the free-form
+// skip/reveal message join whichever slide is currently open.
+function groupMessagesByStage(display) {
+  const groups = [];
+  display.forEach((m, idx) => {
+    const last = groups[groups.length - 1];
+    const isCoachWithStage = m.from === "coach" && typeof m.stage === "number";
+    if (!last || (isCoachWithStage && m.stage !== last.stage)) {
+      groups.push({ stage: isCoachWithStage ? m.stage : last ? last.stage : 1, items: [] });
+    }
+    groups[groups.length - 1].items.push({ msg: m, idx });
+  });
+  return groups;
+}
+
 function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack, soundOn, onToggleSound, wordIndex, isTransferWord }) {
   const mapTheme = getMapTheme(passage.title);
   const stage1Type = STAGE1_CYCLE[wordIndex % STAGE1_CYCLE.length];
@@ -2294,6 +2349,13 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
   const exchangeCountRef = useRef(0);
   const scrollRef = useRef(null);
   const [showSettings, setShowSettings] = useState(false);
+
+  // Slide navigation: one slide per stage instead of one long scrolling
+  // transcript, which used to crowd out readability. activeSlide follows
+  // the newest stage automatically (see the effect below); manually
+  // stepping back with the arrows overrides that until the next new stage
+  // arrives, at which point auto-follow resumes.
+  const [activeSlide, setActiveSlide] = useState(0);
 
   // Reflection flow state
   const [prePhase, setPrePhase] = useState("prior"); // "prior" | "coaching"
@@ -2422,7 +2484,19 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [display, postPhase, transferData]);
+  }, [display, postPhase, transferData, activeSlide]);
+
+  const stageGroups = groupMessagesByStage(display);
+  const isLatestSlide = activeSlide === stageGroups.length - 1;
+
+  useEffect(() => {
+    setActiveSlide(stageGroups.length - 1);
+    // Only re-follow when a new slide actually appears, not on every
+    // display update (e.g. mid-typewriter reveal) — otherwise a student
+    // who stepped back to review an earlier stage would get yanked
+    // forward on every keystroke of the typewriter effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stageGroups.length]);
 
   function handlePriorAnswer(value) {
     SFX.tap();
@@ -2742,7 +2816,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
 
           {prePhase === "coaching" && (
             <>
-              {display.map((m, i) => (
+              {(stageGroups[activeSlide]?.items || []).map(({ msg: m, idx: i }) => (
                 <div key={i} className={`flex ${m.from === "student" ? "justify-end" : "justify-start items-end gap-1.5"} step-in`}>
                   {m.from === "coach" && (
                     <span className="text-xl sm:text-2xl shrink-0 mb-1" title={(COMPANION_PERSONAS[avatarConfig.companion] || COMPANION_PERSONAS.parrot).name}>
@@ -2816,7 +2890,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                 </div>
               ))}
 
-              {loading && typingIndex === null && (
+              {isLatestSlide && loading && typingIndex === null && (
                 <div className="flex justify-start items-end gap-1.5">
                   <span className="text-xl sm:text-2xl shrink-0 mb-1">{companionEmoji}</span>
                   <div className="px-5 py-3.5 rounded-2xl bg-sky-50 border-2 border-sky-200">
@@ -2825,7 +2899,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                 </div>
               )}
 
-              {error && (
+              {isLatestSlide && error && (
                 <div className="border-2 border-rose-300 bg-rose-50 text-rose-600 font-body text-sm px-4 py-3 rounded-2xl flex items-center justify-between gap-2 step-in" aria-live="polite">
                   {error}
                   <BigButton variant="ghost" onClick={() => (history.length <= 1 ? startWord() : submitAnswer(display[display.length - 1]?.text || ""))}>
@@ -2834,7 +2908,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                 </div>
               )}
 
-              {postPhase === null && !loading && current && (() => {
+              {isLatestSlide && postPhase === null && !loading && current && (() => {
                 const raw = (current.display_sentence && current.display_sentence.trim()) || contextSentence;
                 const blank = current.stage === 2;
                 return (
@@ -2862,7 +2936,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                 );
               })()}
 
-              {postPhase === null && !loading && instr && (
+              {isLatestSlide && postPhase === null && !loading && instr && (
                 <div
                   className="flex items-center gap-2 rounded-2xl px-4 py-2.5 step-in border-4 border-white"
                   style={{ background: STAGE_GRADIENTS[current.stage] }}
@@ -2874,13 +2948,13 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                 </div>
               )}
 
-              {postPhase === null && !loading && answersLocked && current && (
+              {isLatestSlide && postPhase === null && !loading && answersLocked && current && (
                 <p className="font-hand text-base sm:text-lg text-stone-400 text-center" aria-hidden="true">
                   read the message, then answer below…
                 </p>
               )}
 
-              {postPhase === null && !loading && !answersLocked && current && current.input_type === "mcq" && current.options && (
+              {isLatestSlide && postPhase === null && !loading && !answersLocked && current && current.input_type === "mcq" && current.options && (
                 <div className="grid grid-cols-1 gap-3 step-in">
                   {current.options.map((opt, i) => (
                     <button
@@ -2897,7 +2971,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                 </div>
               )}
 
-              {postPhase === null && !loading && !answersLocked && current && current.input_type === "true_false" && current.options && (
+              {isLatestSlide && postPhase === null && !loading && !answersLocked && current && current.input_type === "true_false" && current.options && (
                 <div className="grid grid-cols-2 gap-3 step-in">
                   {current.options.map((opt, i) => (
                     <button
@@ -2915,7 +2989,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                 </div>
               )}
 
-              {postPhase === null && !loading && !answersLocked && current && (current.input_type === "tap_select" || current.input_type === "reverse_clue") && current.options && (
+              {isLatestSlide && postPhase === null && !loading && !answersLocked && current && (current.input_type === "tap_select" || current.input_type === "reverse_clue") && current.options && (
                 <div className="flex flex-wrap gap-3 justify-center step-in">
                   {current.options.map((word, i) => (
                     <button
@@ -2930,15 +3004,15 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                 </div>
               )}
 
-              {postPhase === null && !loading && !answersLocked && current && current.input_type === "word_bank" && current.word_tiles && (
+              {isLatestSlide && postPhase === null && !loading && !answersLocked && current && current.input_type === "word_bank" && current.word_tiles && (
                 <WordBankWidget key={current.stage + "-" + current.word_tiles.join("")} tiles={current.word_tiles} onSubmit={submitAnswer} />
               )}
 
-              {postPhase === null && !loading && !answersLocked && current && current.input_type === "letter_connect" && current.word_tiles && (
+              {isLatestSlide && postPhase === null && !loading && !answersLocked && current && current.input_type === "letter_connect" && current.word_tiles && (
                 <LetterConnectWidget key={current.stage + "-" + current.word_tiles.join("")} tiles={current.word_tiles} onSubmit={submitAnswer} />
               )}
 
-              {postPhase === null && !loading && !answersLocked && current && current.input_type === "text" && (
+              {isLatestSlide && postPhase === null && !loading && !answersLocked && current && current.input_type === "text" && (
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -3062,6 +3136,35 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
             </>
           )}
         </div>
+
+        {/* Slide navigation: one slide per stage instead of a scrolling
+            transcript. Only shown once there's more than one stage to
+            step between. */}
+        {stageGroups.length > 1 && (
+          <div className="flex items-center justify-center gap-3 mt-3 shrink-0">
+            <button
+              onClick={() => { SFX.tap(); setActiveSlide((s) => Math.max(0, s - 1)); }}
+              disabled={activeSlide === 0}
+              className="w-9 h-9 rounded-full bg-white flex items-center justify-center disabled:opacity-30"
+              style={{ border: "3px solid #b45309", boxShadow: "0 3px 0 0 #92400e" }}
+              aria-label="Previous stage"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <p className="font-body text-xs font-800 text-stone-500 min-w-[130px] text-center" aria-live="polite">
+              {isLatestSlide ? "Current stage" : `Reviewing stage ${stageGroups[activeSlide]?.stage}`} · {activeSlide + 1}/{stageGroups.length}
+            </p>
+            <button
+              onClick={() => { SFX.tap(); setActiveSlide((s) => Math.min(stageGroups.length - 1, s + 1)); }}
+              disabled={isLatestSlide}
+              className="w-9 h-9 rounded-full bg-white flex items-center justify-center disabled:opacity-30"
+              style={{ border: "3px solid #b45309", boxShadow: "0 3px 0 0 #92400e" }}
+              aria-label="Next stage"
+            >
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
