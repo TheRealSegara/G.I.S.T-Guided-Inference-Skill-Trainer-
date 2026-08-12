@@ -1097,7 +1097,7 @@ function SecretAnimalPicker({ value, onChange }) {
 }
 
 /* ---------------- Setup Screen ---------------- */
-function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoReport, bilingual, onToggleBilingual, onStudentAuthenticated, onOpenFileBox }) {
+function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoReport, bilingual, onToggleBilingual, onStudentAuthenticated, onOpenFileBox, onOpenTeacherGuide }) {
   const [mode, setMode] = useState(null); // null (main menu) | "tour" | "play" | "maker"
   const [step, setStep] = useState(1);
   const [studentId, setStudentId] = useState("");
@@ -1344,6 +1344,14 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                     className="font-body text-xs text-stone-600 underline hover:text-stone-800"
                   >
                     🗃️ File Box
+                  </button>
+                )}
+                {onOpenTeacherGuide && (
+                  <button
+                    onClick={() => { SFX.tap(); onOpenTeacherGuide(); }}
+                    className="font-body text-xs text-stone-600 underline hover:text-stone-800"
+                  >
+                    ❓ How G.I.S.T. works
                   </button>
                 )}
               </div>
@@ -2662,19 +2670,25 @@ function ThinkingDots({ label }) {
   );
 }
 
-// Groups CoachScreen's flat message list into one entry per stage "slide",
-// so the UI can show one stage at a time instead of a long scrolling
-// transcript that crowds out readability. A new slide starts whenever a
-// coach message reports a different stage than the current slide; the
-// student's own replies (no stage of their own) and the free-form
-// skip/reveal message join whichever slide is currently open.
-function groupMessagesByStage(display) {
+// Groups CoachScreen's flat message list into one entry per exchange
+// "slide" (flashcard), so the UI shows one coach turn + the student's
+// reply to it at a time, instead of a long scrolling transcript. A new
+// slide starts on every coach message (question, feedback, resolution,
+// or the free-form skip/reveal message alike) — grouping by stage
+// instead used to let a stuck word's several wrong-attempt exchanges
+// (up to STUCK_WORD_LIMIT) all pile onto one slide, which brought back
+// the same crowded-screen problem this redesign exists to avoid. Each
+// group still carries a `.stage` label (from its own coach message, or
+// inherited from the previous group for the stage-less skip/reveal
+// message) since the header's "Stage X of 5" progress display needs it
+// — that's independent of how many flashcards a stage took to clear.
+function groupMessagesByExchange(display) {
   const groups = [];
   display.forEach((m, idx) => {
-    const last = groups[groups.length - 1];
-    const isCoachWithStage = m.from === "coach" && typeof m.stage === "number";
-    if (!last || (isCoachWithStage && m.stage !== last.stage)) {
-      groups.push({ stage: isCoachWithStage ? m.stage : last ? last.stage : 1, items: [] });
+    const isCoachMsg = m.from === "coach";
+    if (isCoachMsg || groups.length === 0) {
+      const prevStage = groups[groups.length - 1]?.stage ?? 1;
+      groups.push({ stage: typeof m.stage === "number" ? m.stage : prevStage, items: [] });
     }
     groups[groups.length - 1].items.push({ msg: m, idx });
   });
@@ -2835,17 +2849,17 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [display, postPhase, transferData, activeSlide]);
 
-  const stageGroups = groupMessagesByStage(display);
-  const isLatestSlide = activeSlide === stageGroups.length - 1;
+  const slideGroups = groupMessagesByExchange(display);
+  const isLatestSlide = activeSlide === slideGroups.length - 1;
 
   useEffect(() => {
-    setActiveSlide(stageGroups.length - 1);
+    setActiveSlide(slideGroups.length - 1);
     // Only re-follow when a new slide actually appears, not on every
     // display update (e.g. mid-typewriter reveal) — otherwise a student
-    // who stepped back to review an earlier stage would get yanked
+    // who stepped back to review an earlier exchange would get yanked
     // forward on every keystroke of the typewriter effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stageGroups.length]);
+  }, [slideGroups.length]);
 
   function handlePriorAnswer(value) {
     SFX.tap();
@@ -3069,7 +3083,6 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
 
   return (
     <div className="flex flex-col overflow-hidden" style={{ height: "100dvh" }}>
-      <PersistentCompanion avatarConfig={avatarConfig} size="text-4xl" />
       <div className="max-w-4xl mx-auto w-full px-5 pt-6 pb-3 flex-1 flex flex-col min-h-0 step-in">
         {/* Header card */}
         <div className="relative bg-white p-3 pl-14 mb-3 shrink-0" style={{ ...DECKLE, borderColor: mapTheme.border }}>
@@ -3165,7 +3178,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
 
           {prePhase === "coaching" && (
             <>
-              {(stageGroups[activeSlide]?.items || []).map(({ msg: m, idx: i }) => (
+              {(slideGroups[activeSlide]?.items || []).map(({ msg: m, idx: i }) => (
                 <div key={i} className={`flex ${m.from === "student" ? "justify-end" : "justify-start items-end gap-1.5"} step-in`}>
                   {m.from === "coach" && (
                     <span className="text-xl sm:text-2xl shrink-0 mb-1" title={(COMPANION_PERSONAS[avatarConfig.companion] || COMPANION_PERSONAS.parrot).name}>
@@ -3486,29 +3499,29 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
           )}
         </div>
 
-        {/* Slide navigation: one slide per stage instead of a scrolling
-            transcript. Only shown once there's more than one stage to
-            step between. */}
-        {stageGroups.length > 1 && (
+        {/* Slide navigation: one flashcard per exchange instead of a
+            scrolling transcript. Only shown once there's more than one
+            card to step between. */}
+        {slideGroups.length > 1 && (
           <div className="flex items-center justify-center gap-3 mt-3 shrink-0">
             <button
               onClick={() => { SFX.tap(); setActiveSlide((s) => Math.max(0, s - 1)); }}
               disabled={activeSlide === 0}
               className="w-9 h-9 rounded-full bg-white flex items-center justify-center disabled:opacity-30"
               style={{ border: "3px solid #b45309", boxShadow: "0 3px 0 0 #92400e" }}
-              aria-label="Previous stage"
+              aria-label="Previous card"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
             <p className="font-body text-xs font-800 text-stone-500 min-w-[130px] text-center" aria-live="polite">
-              {isLatestSlide ? "Current stage" : `Reviewing stage ${stageGroups[activeSlide]?.stage}`} · {activeSlide + 1}/{stageGroups.length}
+              {isLatestSlide ? "Current" : "Reviewing"} · card {activeSlide + 1} of {slideGroups.length}
             </p>
             <button
-              onClick={() => { SFX.tap(); setActiveSlide((s) => Math.min(stageGroups.length - 1, s + 1)); }}
+              onClick={() => { SFX.tap(); setActiveSlide((s) => Math.min(slideGroups.length - 1, s + 1)); }}
               disabled={isLatestSlide}
               className="w-9 h-9 rounded-full bg-white flex items-center justify-center disabled:opacity-30"
               style={{ border: "3px solid #b45309", boxShadow: "0 3px 0 0 #92400e" }}
-              aria-label="Next stage"
+              aria-label="Next card"
             >
               <ArrowRight className="w-4 h-4" />
             </button>
@@ -3745,7 +3758,6 @@ function ComprehensionScreen({ passage, avatarConfig, onDone }) {
 
   return (
     <div className="flex flex-col overflow-hidden" style={{ height: "100dvh" }}>
-      <PersistentCompanion avatarConfig={avatarConfig} size="text-4xl" />
       <div className="max-w-3xl mx-auto w-full px-5 pt-6 pb-3 flex-1 flex flex-col min-h-0 step-in">
         {/* Header card, matching CoachScreen's identity */}
         <div className="relative bg-white p-3 pl-14 mb-3 shrink-0" style={DECKLE}>
@@ -4461,8 +4473,8 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
 
       {showHelp && (
         <div className="mb-6 p-4 rounded-2xl bg-sky-50 border-2 border-sky-200 step-in font-body text-sm text-stone-700 leading-relaxed">
-          <p className="mb-2"><strong>How to use this:</strong> this is a one-time session view. The student plays through a map during a supervised session, and every word attempt is logged automatically.</p>
-          <p className="mb-2">Tap "Generate diagnostic summary" for a full evidence-based report, then "Download results" to save a copy, opens in any browser and can be printed to PDF from there if needed. This screen's data isn't stored anywhere once you leave the session.</p>
+          <p className="mb-2"><strong>How to use this:</strong> the student plays through a map during a supervised session, and every word attempt is logged automatically.</p>
+          <p className="mb-2">Tap "Generate diagnostic summary" for a full evidence-based report, then "Download results" to save a copy, opens in any browser and can be printed to PDF from there if needed. For a signed-in student, this session also saves to their account automatically, so you can find it again later in the File Box on the main menu, without needing the download.</p>
           <p>Colors mean something: <b>blue</b> boxes are counted directly from the log, no AI involved. <b>Amber</b> boxes are AI-written analysis. The <b>red</b> box is the single headline diagnosis, built from the amber boxes' evidence.</p>
         </div>
       )}
@@ -4623,6 +4635,60 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
           </BigButton>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---------------- Teacher Guide ---------------- */
+// A short, skimmable, on-demand reference for teachers — not a forced
+// multi-step tour like the student's TourScreen. Teachers are adults
+// reading this once (or looking something up), not kids who benefit
+// from game-like guided onboarding, so this is one scrollable page with
+// plain sections rather than a paginated flow.
+function TeacherGuideScreen({ onBack }) {
+  const Section = ({ icon, title, children }) => (
+    <div className="bg-white p-5 mb-4 rounded-3xl relative z-10" style={DECKLE}>
+      <h2 className="font-display font-800 text-lg text-stone-700 mb-2 flex items-center gap-2">
+        <span className="text-2xl">{icon}</span> {title}
+      </h2>
+      <div className="font-body text-sm text-stone-600 leading-relaxed space-y-2">{children}</div>
+    </div>
+  );
+
+  return (
+    <div className="max-w-2xl mx-auto px-6 py-8 step-in relative min-h-screen">
+      <FloatingDecor density={4} />
+      <button onClick={onBack} className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-2 border-stone-200 relative z-10 mb-5 ml-14">
+        <ChevronLeft className="w-3.5 h-3.5" /> Back to menu
+      </button>
+      <h1 className="font-display text-2xl font-800 text-stone-700 mb-1 relative z-10">❓ How G.I.S.T. works</h1>
+      <p className="font-body text-xs text-stone-500 mb-5 relative z-10">A quick reference, not a tour — read whatever's useful, skip the rest.</p>
+
+      <Section icon="🔑" title="Access codes">
+        <p>An access code unlocks the app on a device for your whole school or class — it isn't a per-teacher login. Your school hands out one shared code; anyone who enters it can use G.I.S.T. on that device until the code's session expires (typically a school day).</p>
+      </Section>
+
+      <Section icon="🧑‍🎓" title="Student accounts">
+        <p>Once the device is unlocked, each student signs up once with their full name and picks 3 secret animals in order — that's their "password" for logging back in next time. It's deliberately simple (kid-friendly, not a real password) and kept separate from the animal companion shown on screen during play, so a classmate watching them play can't read it off the screen.</p>
+        <p>A returning student re-enters both to pick up where they left off, with their same coach and look already set.</p>
+      </Section>
+
+      <Section icon="🗺️" title="Playing a session">
+        <p>A student picks a passage, then works through its target vocabulary words one at a time with an AI coach, always guided to work out the meaning from context, never just told the answer. A short comprehension check on the whole passage runs at the end.</p>
+      </Section>
+
+      <Section icon="🛠️" title="The custom map maker">
+        <p>Paste in any passage (80-150 words works best) and G.I.S.T. picks target words for you, ready in under a minute. The number of target words is fixed, deliberately, to keep each map's AI cost predictable — but you're not stuck with whatever the AI picks: the "Words to highlight" boxes let you require specific words yourself, and the AI fills any boxes you leave blank.</p>
+      </Section>
+
+      <Section icon="📔" title="The diagnostic report">
+        <p>Every word attempt during a session is logged automatically (which word, how many hints it took, whether it was skipped, and more). That log is what actually gets analyzed — nothing about the report is guessed or generic.</p>
+        <p>Colors mean something on the report screen: <b>blue</b> boxes are counted directly from the log, no AI involved. <b>Amber</b> boxes are the AI's written analysis of that same log. The <b>red</b> box is a single headline diagnosis, built from the amber boxes' evidence.</p>
+      </Section>
+
+      <Section icon="🗃️" title="The File Box">
+        <p>Every student who's signed up under your access code shows up here, with their full session history — reachable any time from the main menu, not just right after a student finishes playing. Open a student to see their past sessions, and open a session to see its full report again.</p>
+      </Section>
     </div>
   );
 }
@@ -5050,6 +5116,7 @@ export default function App() {
               setStudentAuth({ token, expiresAt, student });
             }}
             onOpenFileBox={() => setScreen("file-box")}
+            onOpenTeacherGuide={() => setScreen("teacher-guide")}
           />
         )}
         {screen === "demo-report" && (
@@ -5064,6 +5131,7 @@ export default function App() {
           />
         )}
         {screen === "file-box" && <FileBoxScreen onBack={() => setScreen("setup")} />}
+        {screen === "teacher-guide" && <TeacherGuideScreen onBack={() => setScreen("setup")} />}
         {screen === "passage" && (
           <PassageScreen
             passage={passage}
