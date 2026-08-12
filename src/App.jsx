@@ -53,7 +53,7 @@ const FontImport = () => (
     @media (prefers-reduced-motion: reduce) {
       .step-in, .bounce-in, .float-slow, .float-med, .wiggle, .spin-slow,
       .confetti-piece, .companion-bob, .companion-speaking, .sparkle-piece,
-      .animate-pulse {
+      .animate-pulse, .animate-bounce {
         animation: none !important;
       }
     }
@@ -123,7 +123,7 @@ function PersistentCompanion({ avatarConfig, size = "text-6xl" }) {
   const speaking = useIsSpeaking();
   return (
     <div
-      className="fixed bottom-4 left-4 z-40 companion-bob pointer-events-none select-none"
+      className="fixed bottom-4 left-4 z-0 companion-bob pointer-events-none select-none"
       aria-hidden="true"
     >
       <span
@@ -349,16 +349,28 @@ function getMapTheme(idOrTitle) {
   return MAP_THEMES[hashString(idOrTitle) % MAP_THEMES.length];
 }
 
-// Fixed at 3 (not adjustable) to keep a session's AI-call cost predictable
-// and comfortably within Gemini's free-tier daily quota. Applies both to
-// how many target words a student session covers and how many words a
+// Fixed at 5 (not adjustable) — the original intended session length,
+// trimmed to 3 while running on Gemini's tight free-tier daily quota.
+// Restored now that Groq's free tier has far more headroom. Applies both
+// to how many target words a student session covers and how many words a
 // teacher's custom map generates.
-const SESSION_WORD_COUNT = 3;
+const SESSION_WORD_COUNT = 5;
 
 // AI calls only retry on a malformed/unparseable response, not on
 // network or auth/quota failures (see NON_RETRYABLE_STATUSES below).
-// Kept low since every retry is a real AI-quota call, not a free retry.
-const MAX_RETRY_ATTEMPTS = 2;
+// Raised back to 3 now that Groq's free tier has enough headroom that an
+// extra retry isn't a meaningful cost, unlike under Gemini's tight quota.
+const MAX_RETRY_ATTEMPTS = 3;
+
+// Coach messages reveal letter-by-letter instead of popping in instantly.
+// Doubles as the pacing gate: answer controls stay locked until the
+// reveal finishes (see appendCoachMessage/TYPEWRITER_MIN_LOCK_MS below),
+// which is also exactly what keeps students from rapid-clicking past
+// Groq's real per-minute request ceiling.
+const TYPEWRITER_CHAR_MS = 18;
+// Minimum lock duration even for a one-word message, so pacing can't be
+// defeated by a short coach reply typing out almost instantly.
+const TYPEWRITER_MIN_LOCK_MS = 1100;
 
 // If a word hasn't resolved after this many student answers, auto-reveal
 // it via the same free fallback Skip uses, instead of letting a stuck
@@ -379,7 +391,7 @@ const PASSAGES = {
   orangutan: {
     title: "A Trip to the Sanctuary",
     emoji: "🌴",
-    mission: "The ranger needs your help! Learn these 3 words so you can tell your little brother the whole story before bedtime.",
+    mission: "The ranger needs your help! Learn these 5 words so you can tell your little brother the whole story before bedtime.",
     arrival: "You made it! Now you know the sanctuary's secret words, your brother is going to love this story tonight.",
     text: `Last Saturday, Mei Ling went to a wildlife park in Sarawak. At first, her little brother was reluctant to walk into the forest. He held his mother's hand tightly and did not want to go. Then he saw an enormous orang utan in a tree. It was very big, almost as big as a car! He forgot to feel scared. Now he felt curious. He asked question after question about the animal. The orang utan's fur felt damp. It had just rained, so everything outside was wet. The ranger said orang utans look big and strong. But they are actually gentle. They are calm and kind, and they do not hurt people.`,
     words: [
@@ -393,7 +405,7 @@ const PASSAGES = {
   kampung: {
     title: "The Kampung Festival",
     emoji: "🎋",
-    mission: "The festival is starting! Crack these 3 words before the rice cakes are ready, so you can help Aiman welcome the guests.",
+    mission: "The festival is starting! Crack these 5 words before the rice cakes are ready, so you can help Aiman welcome the guests.",
     arrival: "The rice cakes are ready and so are you! You've learned every word in the village today.",
     text: `Every year, Aiman's village has a small festival. It is a harvest festival. The kampung becomes bustling. Many visitors come. There are food stalls and children running everywhere. Aiman's grandmother looks delighted. She smiles a big smile when the rice cakes are ready. The rice cakes smell fragrant. The sweet smell of pandan leaves fills the air. By evening, after cooking and welcoming guests all day, the family feels exhausted. They worked hard, so now they feel very tired. But they are also happy. The neighbours are generous too. They share their food freely with anyone who walks by.`,
     words: [
@@ -407,7 +419,7 @@ const PASSAGES = {
   petshow: {
     title: "Pet Show Day",
     emoji: "🐾",
-    mission: "Help Mei and her friends show off their pets! Learn these 3 words before the judges arrive.",
+    mission: "Help Mei and her friends show off their pets! Learn these 5 words before the judges arrive.",
     arrival: "The judges loved every pet! You solved every word, just like a true pet show champion.",
     text: `Today is Pet Show day at school. Many pupils bring their pets. Mei has a small spider. Spiders can look scary, but she says they are brave hunters. Some animals use camouflage. Camouflage helps them hide from enemies. A gecko can change color like this. Ali's cat is very timid. It hides under the chair when guests come. But Ali's dog is clever. It can open doors by itself! Siti's rabbit is playful. It jumps and runs around the room all day.`,
     words: [
@@ -421,7 +433,7 @@ const PASSAGES = {
   robot: {
     title: "The Robot Show",
     emoji: "🤖",
-    mission: "The science fair starts soon! Learn these 3 words to explain how the amazing robot works.",
+    mission: "The science fair starts soon! Learn these 5 words to explain how the amazing robot works.",
     arrival: "The robot show was a huge success, and so are you! Every word explained, every clue solved.",
     text: `Last week, the school had a robot show. A scientist invented a new robot. She built it from small metal parts. The robot looks powerful. It can lift heavy boxes easily. But the robot is also careful. It never drops anything. Everyone said the robot was amazing. It can dance and sing songs too! Inside the robot is a tiny computer, smaller than your hand. The computer helps the robot think and move.`,
     words: [
@@ -515,6 +527,8 @@ Adaptive rules:
 - Messages: 1-3 sentences, warm and fun. Never repeat the same opening line twice in a row.
 - When RESOLVED, vary the reward line (a fun fact, a joke, or a mini-challenge to use the word again). Don't repeat the same style two words in a row.
 
+CORRECTNESS (critical, read carefully): for mcq, true_false, tap_select, word_bank, letter_connect, and reverse_clue, the app itself checks the student's answer against your own "correct_answer"/the target word, deterministically, before your next reply. If the student's message contains a bracketed note like "[FACT: this answer is CORRECT]" or "[FACT: this answer is INCORRECT]", that fact is final — never re-judge or contradict it, just react to it (feedback, hint if incorrect, stage progression). Only for "text" (Stage 3 fix-mistake, Stage 4 continue, Stage 5 free sentence) must you judge correctness yourself, since there's no fixed answer key — be generous there: accept minor spelling/grammar slips and any phrasing that correctly captures the word's meaning and use, don't fail a student over something other than the actual target skill being tested.
+
 input_type per stage is fixed below, not your choice, follow exactly (mechanics defined further down):
 - Stage 1 MUST use input_type "${stage1Type}".
 - Stage 2 MUST use input_type "${stage2Type}".
@@ -524,13 +538,13 @@ input_type per stage is fixed below, not your choice, follow exactly (mechanics 
 CRITICAL: every turn fill "display_sentence" (shown in its own reference box, separate from "message"). Default: the original passage sentence with the target word used correctly — covers Stage 1, Stage 2 (app blanks it visually, give the correct sentence), Stage 3 with "reverse_clue"/"text", and Stage 4/5. Exception: Stage 3 "tap_select" needs a sentence using the word WRONG, matching "options" exactly. Never null, never empty.
 
 Input type definitions:
-- "mcq" (Stage 1 only): message poses a question; options is exactly 4 short answer choices, one correct.
-- "true_false" (Stage 1 only): message poses a true-or-false statement about the word's use; options must be exactly ["True","False"].
-- "word_bank" (Stage 2, word blanked): message asks the student to spell the missing word from context; word_tiles is the target word's letters in SHUFFLED order.
-- "letter_connect" (Stage 2, word blanked): same task as word_bank, but letters are shown in a circle and connected by tapping in order; word_tiles same shuffled format.
-- "tap_select" (Stage 3, word present but WRONG): message is just the instruction (e.g. "Fix the mistake!"); options is display_sentence's words split individually, student taps the ONE wrong word. Never a blank placeholder as an option.
-- "reverse_clue" (Stage 3, word present and CORRECT): message asks which part of the sentence is the clue explaining the word's meaning; options is display_sentence's words split individually, correct tap is the clue phrase itself.
-- "text": free typing, no options/tiles. Used for Stage 2 (type the missing word), Stage 3 (type the correction), Stage 4 (continue from sentence_starter), Stage 5 (original sentence, no scaffolding).
+- "mcq" (Stage 1 only): message poses a question; options is exactly 4 short answer choices, one correct; correct_answer is that option's exact text.
+- "true_false" (Stage 1 only): message poses a true-or-false statement about the word's use; options must be exactly ["True","False"]; correct_answer is exactly "True" or "False".
+- "word_bank" (Stage 2, word blanked): message asks the student to spell the missing word from context; word_tiles is the target word's letters in SHUFFLED order; correct_answer null (the app checks against the target word itself).
+- "letter_connect" (Stage 2, word blanked): same task as word_bank, but letters are shown in a circle and connected by tapping in order; word_tiles same shuffled format; correct_answer null (same reason).
+- "tap_select" (Stage 3, word present but WRONG): message is just the instruction (e.g. "Fix the mistake!"); options is display_sentence's words split individually, student taps the ONE wrong word, correct_answer is that exact word. Never a blank placeholder as an option.
+- "reverse_clue" (Stage 3, word present and CORRECT): message asks which part of the sentence is the clue explaining the word's meaning; options is display_sentence's words split individually, correct tap is the clue phrase itself; correct_answer is that exact phrase, matching one of the options exactly.
+- "text": free typing, no options/tiles, correct_answer always null (see CORRECTNESS above, you judge this type yourself). Used for Stage 2 (type the missing word), Stage 3 (type the correction), Stage 4 (continue from sentence_starter), Stage 5 (original sentence, no scaffolding).
 
 Respond with ONLY valid, compact, single-line JSON, no markdown fences, no extra commentary, no literal line breaks inside any string value, in exactly this shape:
 {
@@ -539,6 +553,7 @@ Respond with ONLY valid, compact, single-line JSON, no markdown fences, no extra
   "input_type": "mcq" or "true_false" or "tap_select" or "word_bank" or "letter_connect" or "reverse_clue" or "text",
   "options": ["a","b","c","d"] or null (mcq, true_false, tap_select, reverse_clue),
   "word_tiles": ["l","e","t","t","e","r","s"] or null (word_bank, letter_connect, shuffled),
+  "correct_answer": "string or null, REQUIRED (non-null) for mcq/true_false/tap_select/reverse_clue, must exactly match one of this turn's options; null for word_bank/letter_connect/text",
   "sentence_starter": "string or null, ONLY at Stage 4: sentence beginning up to where the student continues, don't repeat this text inside message",
   "stage": number (the stage this new question belongs to, 1-5),
   "hint_given": boolean,
@@ -819,14 +834,40 @@ function safeParseJSON(raw) {
   return null;
 }
 
-async function callClaudeWithRetry(systemPrompt, messages, attempts = MAX_RETRY_ATTEMPTS) {
+// Coach-only response shape check. A smaller model can return syntactically
+// valid JSON that's still unusable (wrong/misspelled input_type, missing
+// options for a type that needs them, a correct_answer that isn't even one
+// of its own options) — previously that shape silently reached the render,
+// which matches none of the answer-widget conditions, so the student saw no
+// way to answer at all. Treating an invalid shape the same as invalid JSON
+// (retry, don't render) catches that before it reaches the screen.
+const COACH_INPUT_TYPES = new Set(["mcq", "true_false", "tap_select", "word_bank", "letter_connect", "reverse_clue", "text"]);
+const COACH_TYPES_NEEDING_OPTIONS = new Set(["mcq", "true_false", "tap_select", "reverse_clue"]);
+const COACH_TYPES_NEEDING_TILES = new Set(["word_bank", "letter_connect"]);
+
+function validateCoachResponse(parsed) {
+  if (!parsed || typeof parsed.message !== "string" || !parsed.message.trim()) return false;
+  if (typeof parsed.display_sentence !== "string" || !parsed.display_sentence.trim()) return false;
+  if (!COACH_INPUT_TYPES.has(parsed.input_type)) return false;
+  if (typeof parsed.stage !== "number" || parsed.stage < 1 || parsed.stage > 5) return false;
+  if (COACH_TYPES_NEEDING_OPTIONS.has(parsed.input_type)) {
+    if (!Array.isArray(parsed.options) || parsed.options.length < 2) return false;
+    if (typeof parsed.correct_answer !== "string" || !parsed.options.includes(parsed.correct_answer)) return false;
+  }
+  if (COACH_TYPES_NEEDING_TILES.has(parsed.input_type) && (!Array.isArray(parsed.word_tiles) || parsed.word_tiles.length === 0)) {
+    return false;
+  }
+  return true;
+}
+
+async function callClaudeWithRetry(systemPrompt, messages, attempts = MAX_RETRY_ATTEMPTS, validate = null) {
   let lastError = null;
   for (let i = 0; i < attempts; i++) {
     try {
       const raw = await callClaude(systemPrompt, messages);
       const parsed = safeParseJSON(raw);
-      if (parsed) return parsed;
-      lastError = new Error("Response wasn't valid JSON");
+      if (parsed && (!validate || validate(parsed))) return parsed;
+      lastError = new Error(parsed ? "Response didn't match the expected shape" : "Response wasn't valid JSON");
     } catch (e) {
       lastError = e;
       if (NON_RETRYABLE_STATUSES.has(e.status)) break;
@@ -1344,7 +1385,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
         <div className="step-in relative z-10 max-h-full overflow-y-auto">
           <h1 className="font-display font-800 text-xl text-stone-700 block mb-3 text-center bg-white/70 rounded-xl py-1.5">Build your explorer</h1>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-white p-4" style={KID_CARD}>
               <div className="flex justify-center mb-3">
                 <AvatarDisplay config={avatarConfig} size={80} />
@@ -1392,14 +1433,14 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
               </div>
             </div>
 
-            <div className="bg-white p-6 flex flex-col flex-1 justify-center" style={KID_CARD}>
-              <p className="font-display font-700 text-sm uppercase tracking-wide text-amber-700 mb-6 text-center">Badge color</p>
-              <div className="grid grid-cols-4 gap-6 justify-items-center">
+            <div className="bg-white p-4 sm:p-6 flex flex-col flex-1 justify-center" style={KID_CARD}>
+              <p className="font-display font-700 text-sm uppercase tracking-wide text-amber-700 mb-4 sm:mb-6 text-center">Badge color</p>
+              <div className="grid grid-cols-4 gap-3 sm:gap-6 justify-items-center">
                 {BADGE_COLORS.map((b) => (
                   <button
                     key={b.id}
                     onClick={() => { SFX.tap(); setAvatarConfig((c) => ({ ...c, badge: b.id })); }}
-                    className={`w-16 h-16 rounded-full transition-all active:scale-90 ${
+                    className={`w-12 h-12 sm:w-16 sm:h-16 rounded-full transition-all active:scale-90 ${
                       avatarConfig.badge === b.id ? "scale-110" : "opacity-60 hover:opacity-100"
                     }`}
                     style={{ background: b.gradient, border: avatarConfig.badge === b.id ? "4px solid #b45309" : "4px solid white", boxShadow: avatarConfig.badge === b.id ? "0 3px 0 0 #92400e" : "0 3px 0 0 rgba(120,53,15,0.25)" }}
@@ -1410,14 +1451,14 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
               <p className="font-hand text-xl text-stone-500 text-center mt-6">{BADGE_COLORS.find((b) => b.id === avatarConfig.badge)?.label}</p>
             </div>
 
-            <div className="bg-white p-6 flex flex-col flex-1 justify-center" style={KID_CARD}>
-              <p className="font-display font-700 text-sm uppercase tracking-wide text-amber-700 mb-6 text-center">Gear</p>
-              <div className="grid grid-cols-4 gap-6 justify-items-center">
+            <div className="bg-white p-4 sm:p-6 flex flex-col flex-1 justify-center" style={KID_CARD}>
+              <p className="font-display font-700 text-sm uppercase tracking-wide text-amber-700 mb-4 sm:mb-6 text-center">Gear</p>
+              <div className="grid grid-cols-4 gap-3 sm:gap-6 justify-items-center">
                 {ACCESSORY_STICKERS.map((a) => (
                   <button
                     key={a.id}
                     onClick={() => { SFX.tap(); setAvatarConfig((c) => ({ ...c, accessory: a.id })); }}
-                    className={`w-16 h-16 rounded-full bg-white flex items-center justify-center text-3xl transition-all active:scale-90 ${
+                    className={`w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-white flex items-center justify-center text-2xl sm:text-3xl transition-all active:scale-90 ${
                       avatarConfig.accessory === a.id ? "border-amber-600 scale-110 bg-amber-50" : "border-stone-200 opacity-60 hover:opacity-100"
                     }`}
                     style={{ borderWidth: "4px", boxShadow: avatarConfig.accessory === a.id ? "0 3px 0 0 #b45309" : "0 3px 0 0 #e7e5e4" }}
@@ -1513,7 +1554,23 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
 }
 
 /* ---------------- Progress Trail ---------------- */
-const TRAIL_POINTS = [[70, 90], [325, 30], [590, 92], [855, 26], [1120, 86]];
+// Computed rather than a fixed 5-point array so the trail always spans the
+// full viewBox width and stays centered, no matter how many words a session
+// (or a teacher's custom map) has — slicing a fixed array from the left
+// used to leave shorter sessions bunched against the left edge instead of
+// spread across the available width.
+function computeTrailPoints(n) {
+  if (n <= 0) return [];
+  const viewWidth = 1190;
+  const margin = 70;
+  const bottomY = 88;
+  const topY = 28;
+  return Array.from({ length: n }, (_, i) => {
+    const x = n === 1 ? viewWidth / 2 : margin + ((viewWidth - margin * 2) * i) / (n - 1);
+    const y = i % 2 === 0 ? bottomY : topY;
+    return [x, y];
+  });
+}
 
 function trailPath(points) {
   return points
@@ -1529,7 +1586,7 @@ function trailPath(points) {
 
 function ProgressTrail({ words, solvedWords, avatarConfig, totalMilestone }) {
   const solvedCount = solvedWords.length;
-  const points = TRAIL_POINTS.slice(0, words.length);
+  const points = computeTrailPoints(words.length);
   const pathD = trailPath(points);
   const stoneColors = ["#16a34a", "#0e7490", "#b45309", "#c2410c", "#be185d"];
 
@@ -1709,7 +1766,7 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, avatar
         </h1>
         <div className="font-body text-lg leading-9 text-stone-700" style={{ columnCount: 2, columnGap: "2.5rem" }}>{renderPassage()}</div>
       </div>
-      <p className="font-hand text-lg text-stone-600 mt-4 text-center bg-white/70 rounded-xl py-1.5">
+      <p className="relative z-50 font-hand text-lg text-stone-600 mt-4 text-center bg-white/90 rounded-xl py-1.5">
         {revealedCount < sentences.length ? "📖 Read on, then tap a marked spot you don't know!" : "👆 Tap a marked spot you don't know!"}
       </p>
 
@@ -2186,6 +2243,23 @@ const STAGE1_CYCLE = ["mcq", "true_false"];
 const STAGE2_CYCLE = ["word_bank", "text", "letter_connect"]; // word is absent (blank) here, nothing to tap
 const STAGE3_CYCLE = ["tap_select", "text", "reverse_clue"]; // a wrong word is present here, tappable, or clue-recognition
 
+// Quiet "coach is typing" cue: replaces the old static "is thinking… 🤔"
+// text. Used both while waiting on the AI response and, briefly, as the
+// first frame of a just-arrived message before its first letter reveals,
+// so there's no separate pop-in between "thinking" and "typing".
+function ThinkingDots({ label }) {
+  return (
+    <span className="inline-flex items-center" role="status">
+      <span className="sr-only">{label}</span>
+      <span aria-hidden="true" className="flex items-center gap-1 py-1">
+        <span className="w-2 h-2 rounded-full bg-stone-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+        <span className="w-2 h-2 rounded-full bg-stone-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+        <span className="w-2 h-2 rounded-full bg-stone-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+      </span>
+    </span>
+  );
+}
+
 function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack, soundOn, onToggleSound, wordIndex, isTransferWord }) {
   const mapTheme = getMapTheme(passage.title);
   const stage1Type = STAGE1_CYCLE[wordIndex % STAGE1_CYCLE.length];
@@ -2217,6 +2291,66 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
   const resolvedBaseRef = useRef(null);
   const [pacingElapsed, setPacingElapsed] = useState(0);
 
+  // Typewriter reveal + pacing gate: a coach message is revealed
+  // letter-by-letter, and (when opts.lockAnswers is set) the answer
+  // controls stay hidden until it finishes, with a minimum lock duration
+  // so even a one-word message doesn't unlock instantly. One mechanism
+  // serves both the "coach is typing" UX and the "read before you click"
+  // goal, instead of two separate ones.
+  const [typingIndex, setTypingIndex] = useState(null);
+  const [revealedLength, setRevealedLength] = useState(0);
+  const [answersLocked, setAnswersLocked] = useState(false);
+  const typewriterTimerRef = useRef(null);
+  const lockTimerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (typewriterTimerRef.current) clearInterval(typewriterTimerRef.current);
+      if (lockTimerRef.current) clearTimeout(lockTimerRef.current);
+    };
+  }, []);
+
+  function appendCoachMessage(entry, opts = {}) {
+    const lockAnswers = opts.lockAnswers ?? false;
+    const idx = display.length;
+    setDisplay((d) => [...d, entry]);
+
+    if (typewriterTimerRef.current) clearInterval(typewriterTimerRef.current);
+    if (lockTimerRef.current) clearTimeout(lockTimerRef.current);
+
+    const text = entry.text || "";
+    const reduceMotion = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const totalMs = reduceMotion ? 0 : text.length * TYPEWRITER_CHAR_MS;
+
+    if (lockAnswers) setAnswersLocked(true);
+
+    if (reduceMotion) {
+      setTypingIndex(null);
+      setRevealedLength(text.length);
+    } else {
+      setTypingIndex(idx);
+      setRevealedLength(0);
+      const start = Date.now();
+      typewriterTimerRef.current = setInterval(() => {
+        const chars = Math.min(text.length, Math.floor((Date.now() - start) / TYPEWRITER_CHAR_MS));
+        setRevealedLength(chars);
+        if (chars >= text.length) {
+          clearInterval(typewriterTimerRef.current);
+          typewriterTimerRef.current = null;
+          setTypingIndex(null);
+        }
+      }, TYPEWRITER_CHAR_MS);
+    }
+
+    if (lockAnswers) {
+      const lockDuration = Math.max(TYPEWRITER_MIN_LOCK_MS, totalMs);
+      lockTimerRef.current = setTimeout(() => {
+        setAnswersLocked(false);
+        lockTimerRef.current = null;
+      }, lockDuration);
+    }
+  }
+
   useEffect(() => {
     const t = setInterval(() => {
       if (wordStartRef.current && !wordDone) {
@@ -2244,7 +2378,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
   function skipWord(stageOverride) {
     SFX.click();
     const revealText = `"${targetWord.word}" — ask your teacher to explain this one together!`;
-    setDisplay((d) => [...d, { from: "coach", text: revealText, revealed: true }]);
+    appendCoachMessage({ from: "coach", text: revealText, revealed: true });
     if (soundEnabled) setTimeout(() => speak(revealText), 300);
     setCurrent(null);
     setWordDone(true);
@@ -2288,11 +2422,11 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
     const openingMsg = `Passage: "${passage.text}"\n\nStart coaching for the target word "${targetWord.word}". Begin at Stage 1.`;
     const msgs = [{ role: "user", content: openingMsg }];
     try {
-      const parsed = await callClaudeWithRetry(buildCoachSystemPrompt(avatarConfig.companion, stage1Type, stage2Type, stage3Type), msgs);
+      const parsed = await callClaudeWithRetry(buildCoachSystemPrompt(avatarConfig.companion, stage1Type, stage2Type, stage3Type), msgs, MAX_RETRY_ATTEMPTS, validateCoachResponse);
       setHistory([...msgs, { role: "assistant", content: JSON.stringify(parsed) }]);
       setCurrent(parsed);
       setStageReached(parsed.stage || 1);
-      setDisplay([{ from: "coach", text: parsed.message, hint: parsed.hint_given, stage: parsed.stage }]);
+      appendCoachMessage({ from: "coach", text: parsed.message, hint: parsed.hint_given, stage: parsed.stage }, { lockAnswers: true });
       if (parsed.hint_given) hintsUsedRef.current += 1;
       if (soundEnabled) setTimeout(() => speak(parsed.message), 300);
     } catch (e) {
@@ -2302,15 +2436,39 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
     }
   }
 
+  // Closed-form input types have a knowable correct answer, so the app
+  // checks them itself instead of asking an 8B model to remember and
+  // re-judge its own multi-turns-ago question. Only "text" (genuinely
+  // open-ended: fix-the-mistake, sentence completion, free sentence) has
+  // no fixed answer key and stays an AI judgment call.
+  function getCorrectAnswerForCurrent() {
+    if (!current) return null;
+    switch (current.input_type) {
+      case "mcq":
+      case "true_false":
+      case "tap_select":
+      case "reverse_clue":
+        return typeof current.correct_answer === "string" ? current.correct_answer : null;
+      case "word_bank":
+      case "letter_connect":
+        return targetWord.word;
+      default:
+        return null;
+    }
+  }
+
   async function submitAnswer(answerText) {
     if (!current) return;
     SFX.click();
     setDisplay((d) => [...d, { from: "student", text: answerText }]);
     setLoading(true);
     setError(null);
-    const newHistory = [...history, { role: "user", content: answerText }];
+    const correctAnswer = getCorrectAnswerForCurrent();
+    const isCorrect = correctAnswer !== null ? answerText.trim().toLowerCase() === correctAnswer.trim().toLowerCase() : null;
+    const factNote = isCorrect === null ? "" : `\n[FACT: this answer is ${isCorrect ? "CORRECT" : "INCORRECT"}. Trust this, don't re-judge correctness yourself this turn.]`;
+    const newHistory = [...history, { role: "user", content: answerText + factNote }];
     try {
-      const parsed = await callClaudeWithRetry(buildCoachSystemPrompt(avatarConfig.companion, stage1Type, stage2Type, stage3Type), newHistory);
+      const parsed = await callClaudeWithRetry(buildCoachSystemPrompt(avatarConfig.companion, stage1Type, stage2Type, stage3Type), newHistory, MAX_RETRY_ATTEMPTS, validateCoachResponse);
       const updatedHistory = [...newHistory, { role: "assistant", content: JSON.stringify(parsed) }];
       setHistory(updatedHistory);
       if (parsed.hint_given) hintsUsedRef.current += 1;
@@ -2318,7 +2476,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
 
       if (parsed.resolved) {
         SFX.resolved();
-        setDisplay((d) => [...d, { from: "coach", text: parsed.message, hint: parsed.hint_given, stage: parsed.stage, resolved: true, funFact: parsed.fun_fact }]);
+        appendCoachMessage({ from: "coach", text: parsed.message, hint: parsed.hint_given, stage: parsed.stage, resolved: true, funFact: parsed.fun_fact });
         setCurrent(null);
         if (soundEnabled) setTimeout(() => speak(parsed.message), 350);
         resolvedBaseRef.current = {
@@ -2345,7 +2503,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
           return;
         }
         if (parsed.hint_given) { SFX.hint(); } else { SFX.correct(); }
-        setDisplay((d) => [...d, { from: "coach", text: parsed.message, hint: parsed.hint_given, stage: parsed.stage }]);
+        appendCoachMessage({ from: "coach", text: parsed.message, hint: parsed.hint_given, stage: parsed.stage }, { lockAnswers: true });
         setCurrent(parsed);
         if (soundEnabled) setTimeout(() => speak(parsed.message), 350);
       }
@@ -2607,7 +2765,20 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                     {m.hint && !m.resolved && <p className="font-hand text-lg sm:text-xl text-amber-600 mb-1">💡 here's a hint —</p>}
                     {m.revealed && <p className="font-hand text-lg sm:text-xl text-rose-500 mb-1">📖 here's the answer —</p>}
                     <div className="flex items-start gap-2">
-                      <p className="font-body text-lg sm:text-xl leading-relaxed">{m.text}</p>
+                      <p className="font-body text-lg sm:text-xl leading-relaxed">
+                        {i === typingIndex ? (
+                          revealedLength === 0 ? (
+                            <ThinkingDots label={`${(COMPANION_PERSONAS[avatarConfig.companion] || COMPANION_PERSONAS.parrot).name} is typing`} />
+                          ) : (
+                            <>
+                              {m.text.slice(0, revealedLength)}
+                              <span aria-hidden="true" className="inline-block w-[2px] h-[1em] bg-stone-400 align-middle ml-0.5 animate-pulse" />
+                            </>
+                          )
+                        ) : (
+                          m.text
+                        )}
+                      </p>
                       {m.from === "coach" && (
                         <button
                           onClick={() => speak(m.text)}
@@ -2628,11 +2799,11 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                 </div>
               ))}
 
-              {loading && (
+              {loading && typingIndex === null && (
                 <div className="flex justify-start items-end gap-1.5">
                   <span className="text-xl sm:text-2xl shrink-0 mb-1">{companionEmoji}</span>
                   <div className="px-5 py-3.5 rounded-2xl bg-sky-50 border-2 border-sky-200">
-                    <p className="font-hand text-lg text-stone-500">{(COMPANION_PERSONAS[avatarConfig.companion] || COMPANION_PERSONAS.parrot).name} is thinking… 🤔</p>
+                    <ThinkingDots label={`${(COMPANION_PERSONAS[avatarConfig.companion] || COMPANION_PERSONAS.parrot).name} is thinking`} />
                   </div>
                 </div>
               )}
@@ -2686,7 +2857,13 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                 </div>
               )}
 
-              {postPhase === null && !loading && current && current.input_type === "mcq" && current.options && (
+              {postPhase === null && !loading && answersLocked && current && (
+                <p className="font-hand text-base sm:text-lg text-stone-400 text-center" aria-hidden="true">
+                  read the message, then answer below…
+                </p>
+              )}
+
+              {postPhase === null && !loading && !answersLocked && current && current.input_type === "mcq" && current.options && (
                 <div className="grid grid-cols-1 gap-3 step-in">
                   {current.options.map((opt, i) => (
                     <button
@@ -2703,7 +2880,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                 </div>
               )}
 
-              {postPhase === null && !loading && current && current.input_type === "true_false" && current.options && (
+              {postPhase === null && !loading && !answersLocked && current && current.input_type === "true_false" && current.options && (
                 <div className="grid grid-cols-2 gap-3 step-in">
                   {current.options.map((opt, i) => (
                     <button
@@ -2721,7 +2898,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                 </div>
               )}
 
-              {postPhase === null && !loading && current && (current.input_type === "tap_select" || current.input_type === "reverse_clue") && current.options && (
+              {postPhase === null && !loading && !answersLocked && current && (current.input_type === "tap_select" || current.input_type === "reverse_clue") && current.options && (
                 <div className="flex flex-wrap gap-3 justify-center step-in">
                   {current.options.map((word, i) => (
                     <button
@@ -2736,15 +2913,15 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                 </div>
               )}
 
-              {postPhase === null && !loading && current && current.input_type === "word_bank" && current.word_tiles && (
+              {postPhase === null && !loading && !answersLocked && current && current.input_type === "word_bank" && current.word_tiles && (
                 <WordBankWidget key={current.stage + "-" + current.word_tiles.join("")} tiles={current.word_tiles} onSubmit={submitAnswer} />
               )}
 
-              {postPhase === null && !loading && current && current.input_type === "letter_connect" && current.word_tiles && (
+              {postPhase === null && !loading && !answersLocked && current && current.input_type === "letter_connect" && current.word_tiles && (
                 <LetterConnectWidget key={current.stage + "-" + current.word_tiles.join("")} tiles={current.word_tiles} onSubmit={submitAnswer} />
               )}
 
-              {postPhase === null && !loading && current && current.input_type === "text" && (
+              {postPhase === null && !loading && !answersLocked && current && current.input_type === "text" && (
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
