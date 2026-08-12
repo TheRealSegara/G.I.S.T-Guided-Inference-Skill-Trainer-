@@ -668,7 +668,7 @@ Respond with ONLY valid, compact JSON, no markdown fences, no extra text, in exa
 }
 The "words" array must have exactly ${wordCount} entries.`;
 
-const DIAGNOSTIC_SYSTEM_PROMPT = `You are the G.I.S.T. diagnostic engine. G.I.S.T. is purely an assessment tool, it exists to reveal what a student understands, not to be the thing they get taught with again. You read a log of a Malaysian primary school ESL student's completed vocabulary coaching session and produce six separate pieces of teacher-facing output: a one-glance summary plus the five detailed parts below it.
+const DIAGNOSTIC_SYSTEM_PROMPT = `You are the G.I.S.T. diagnostic engine. G.I.S.T. is purely an assessment tool, it exists to reveal what a student understands, not to be the thing they get taught with again. You read a log of a Malaysian primary school ESL student's completed vocabulary coaching session and produce five separate pieces of teacher-facing output: a one-glance summary plus the four detailed parts below it.
 
 Each log entry contains: the word, its clueType (contrast, definition, example, or inference), its concreteness (abstract or concrete), the stage the student needed to reach to resolve it (1-5, higher means they needed more support), how many hints they used, whether the word was skipped, whether they reported seeing the word before ("priorKnowledge": yes/no/not_sure), how they say they got it ("gotItVia": knew/clues/guessed), which clue phrase they identified as helping them (if any), how long they took to answer in seconds ("timeToAnswerSec"), and, for at most one word this session, a transfer test result (whether they could use the word correctly in a brand-new sentence, "transferPassed": true/false/null). You are also given the whole-passage comprehension check result (correct or incorrect) and the question/answer involved. You may also be given optional teacher notes about the session's context (e.g. "right after recess," "usually stronger with reading"), factor these in wherever relevant, they explain circumstances the log alone can't show, they don't override what the data actually shows.
 
@@ -685,9 +685,9 @@ HARD RULES for all parts, not optional:
 - If the log is too short for a confident pattern (fewer than 3 non-skipped entries), say so plainly in whichever section it affects, and just report what happened with those specific words instead of generalising.
 
 FORMAT RULES for all parts, not optional, this creates real visual hierarchy instead of a wall of text:
-- Every sentence you write, in every field including "summary", under 12 words, never more than 15. Short, plain, direct sentences, not dense compound ones, a busy teacher reading this between classes shouldn't have to re-read a sentence to parse it.
-- Each field (except "summary" and storyUnderstandingNote) must be written as: ONE short bolded headline sentence on its own line, then a blank line, then 2-4 bullet points, each on its own line starting with "- ". Use literal "\\n" characters in the JSON string for line breaks, never write it all as one flowing paragraph.
-- Each bullet must be short, one specific point, one piece of evidence. Don't write a bullet longer than one sentence.
+- Prioritize specificity over brevity. A sentence should be exactly as long as it needs to be to carry a named-word claim and its evidence, no fixed word limit — the HARD RULES above (name the words, cite the evidence, no generic filler) are what should shape a sentence's length, not an artificial cap. Don't ramble or pad, but never compress a specific point into a vague short one just to keep it brief.
+- Each field (except "summary" and storyUnderstandingNote) must be written as: ONE bolded headline sentence on its own line, then a blank line, then 2-4 bullet points, each on its own line starting with "- ". Use literal "\\n" characters in the JSON string for line breaks, never write it all as one flowing paragraph.
+- Each bullet is one specific point, one piece of evidence, but can run as long as that evidence needs.
 - storyUnderstandingNote is short enough (1-2 sentences) to stay as plain text, no bullets needed there, but the bold-evidence rule still applies.
 
 PART 0 — "summary" (1-2 plain sentences, no bullets, no bold):
@@ -695,32 +695,26 @@ PART 0 — "summary" (1-2 plain sentences, no bullets, no bold):
 - State the one clearest pattern in the plainest possible words, e.g. "Ahmad understands words that are explained directly, but not words he has to work out from a hint." Name at most one word as a light example, don't pack in evidence, that's what the sections below are for.
 - No markdown, no bullets, no bold asterisks, just two short plain sentences.
 
-PART 1 — "coreProblem" (headline + up to 3 bullets):
+PART 1 — "corePattern" (headline + up to 4 bullets):
 - Headline: describe this student the way you'd describe them to another teacher, not a word-category scorecard. Fuse two things into one read: the specific word-level pattern (which kind of clue trips them up, in plain words) AND the session-level arc, did their hint use or response time get better or worse as the session went on, did skips cluster near the end (a fatigue signal, different from a difficulty signal), did they seem to engage less over time. Only claim a session-level arc if the data actually supports it (roughly 4+ non-skipped entries with real variation), otherwise stick to the word-level pattern alone.
-- Bullets: enough specific named-word evidence to justify the headline, plus one bullet naming a genuine strength held to the same evidence standard, so this reads as "here is exactly where the gap is and isn't," not a blanket verdict.
+- Bullets: enough specific named-word evidence to justify the headline, plus one bullet naming a genuine strength held to the same evidence standard, so this reads as "here is exactly where the gap is and isn't," not a blanket verdict. Include one bullet that explains what the pattern actually means for how this student currently reads, not just more evidence for the pattern itself — e.g. "This means when a word's meaning is spelled out for them, they're confident, but when they have to infer it from a signal word like 'but' or 'however,' that's a genuinely different skill they haven't built yet, not a vocabulary gap." Do NOT predict future performance or readiness for harder material in that bullet, that's not something one session can responsibly support, stay anchored to what this session's pattern reveals about how this student currently processes context clues, nothing beyond that.
 - If the data genuinely doesn't support a single clear pattern, say so plainly as the headline instead of manufacturing one, and give fewer bullets.
 
-PART 2 — "whatThisMeans" (headline + 2-3 bullets):
-- This section answers "so what does this actually mean for how this student reads," not a restatement of the pattern. Explain significance, not more evidence, that belongs in Part 1.
-- Do NOT predict future performance or readiness for harder material, that's not something one session can responsibly support, stay anchored to what this session's pattern reveals about how this student currently processes context clues, nothing beyond that.
-- Example shape (write your own, don't copy this): "This means when a word's meaning is spelled out for them, they're confident, but when they have to infer it from a signal word like 'but' or 'however,' that's a genuinely different skill they haven't built yet, not a vocabulary gap."
-
-PART 3 — "howReliable" (headline + 2-4 bullets):
+PART 2 — "howReliable" (headline + 2-4 bullets):
 - Headline: one plain-language verdict on how much a teacher should trust this session's correct answers overall.
 - Bullets: compare what a student claimed beforehand against what they actually did, and name any mismatch specifically in plain terms (e.g. "said they'd never seen 'exhausted' before, then said afterward they already knew it, worth a quick check with them directly"); note which correct answers are backed by real evidence versus which ones aren't (a fast guess that happened to be right isn't the same as reasoning it out); if a sentence-swap check ran this session, describe its result as the strongest single piece of evidence available, in plain words, not as a named test.
 
-PART 4 — "storyUnderstandingNote" (1-2 sentences, plain text):
+PART 3 — "storyUnderstandingNote" (1-2 sentences, plain text):
 - Given the comprehension check result, write a short line connecting it back to the vocabulary work, made clear that this tests following the actual story, not just knowing individual words.
 
-PART 5 — "whatToTry" (headline + 2-3 bullets):
+PART 4 — "whatToTry" (headline + 2-3 bullets):
 - Headline: the one real classroom teaching action for the teacher's next actual lesson, completely independent of G.I.S.T. or any app. Never mention the game, an app stage, or an interaction type, G.I.S.T. only assesses, it doesn't reteach.
-- Bullets: why this action, referencing the specific word(s) and the plain-language pattern from Parts 1 and 2, not generic ("give more vocabulary practice" is not acceptable); end the final bullet with one short, ready-to-use line the teacher could say out loud to the student right now, in quotation marks.
+- Bullets: why this action, referencing the specific word(s) and the plain-language pattern from Part 1, not generic ("give more vocabulary practice" is not acceptable); end the final bullet with one short, ready-to-use line the teacher could say out loud to the student right now, in quotation marks.
 
 Respond with ONLY valid JSON, no markdown fences, no extra text, in exactly this shape:
 {
   "summary": "string",
-  "coreProblem": "string",
-  "whatThisMeans": "string",
+  "corePattern": "string",
   "howReliable": "string",
   "storyUnderstandingNote": "string",
   "whatToTry": "string"
@@ -1363,7 +1357,8 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
               </BigButton>
               <button
                 onClick={() => { SFX.tap(); setAfterTour("menu"); setMode("tour"); }}
-                className="mt-3 font-body text-xs text-stone-500 underline hover:text-stone-700"
+                className="mt-3 font-display font-700 text-xs text-teal-700 hover:text-teal-900 bg-white rounded-full px-3 py-1.5 border-2"
+                style={{ borderColor: "#0d9488" }}
               >
                 ❓ How to play (see the tutorial again)
               </button>
@@ -1386,7 +1381,8 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                 {onViewDemoReport && (
                   <button
                     onClick={() => { SFX.tap(); onViewDemoReport(); }}
-                    className="font-body text-xs text-stone-600 underline hover:text-stone-800"
+                    className="font-display font-700 text-xs text-red-700 hover:text-red-900 bg-white rounded-full px-3 py-1.5 border-2"
+                    style={{ borderColor: "#dc2626" }}
                   >
                     🔦 See a sample report
                   </button>
@@ -1394,7 +1390,8 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                 {onOpenFileBox && (
                   <button
                     onClick={() => { SFX.tap(); onOpenFileBox(); }}
-                    className="font-body text-xs text-stone-600 underline hover:text-stone-800"
+                    className="font-display font-700 text-xs text-blue-700 hover:text-blue-900 bg-white rounded-full px-3 py-1.5 border-2"
+                    style={{ borderColor: "#2563eb" }}
                   >
                     🗃️ File Box
                   </button>
@@ -1402,7 +1399,8 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                 {onOpenTeacherGuide && (
                   <button
                     onClick={() => { SFX.tap(); onOpenTeacherGuide(); }}
-                    className="font-body text-xs text-stone-600 underline hover:text-stone-800"
+                    className="font-display font-700 text-xs text-teal-700 hover:text-teal-900 bg-white rounded-full px-3 py-1.5 border-2"
+                    style={{ borderColor: "#0d9488" }}
                   >
                     ❓ How G.I.S.T. works
                   </button>
@@ -3716,8 +3714,7 @@ function buildReportHtml(studentId, log, summary) {
   const sections = summary
     ? [
         { label: "📌 Summary", text: summary.summary, cls: "highlight" },
-        { label: "🎯 The Core Problem", text: summary.coreProblem, cls: "core" },
-        { label: "💭 What This Actually Means", text: summary.whatThisMeans, cls: "" },
+        { label: "🎯 The Pattern", text: summary.corePattern || summary.coreProblem, cls: "core" },
         { label: "🧠 How Reliable Is This", text: summary.howReliable, cls: "" },
         { label: "📖 Story Understanding", text: summary.storyUnderstandingNote, cls: "" },
         { label: "💡 What To Try in Class", text: summary.whatToTry, cls: "rec" },
@@ -3739,9 +3736,10 @@ function buildReportHtml(studentId, log, summary) {
   body { font-family: Georgia, 'Times New Roman', serif; padding: 40px; color: #2a1a0f; max-width: 800px; margin: 0 auto; }
   h1 { color: #92400e; margin-bottom: 4px; }
   p { margin: 4px 0; }
-  table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #ffffff; }
-  th, td { border: 1px solid #d6b370; padding: 8px 12px; text-align: left; font-size: 14px; background: #ffffff; color: #2a1a0f; }
-  th { background: #fef3c7; }
+  .table-wrap { margin-top: 20px; border: 3px solid #2563eb; border-radius: 20px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; background: #ffffff; }
+  th, td { border: 1px solid #bfdbfe; padding: 8px 12px; text-align: left; font-size: 14px; background: #ffffff; color: #2a1a0f; }
+  th { background: #dbeafe; }
   .summary { margin-top: 16px; padding: 16px; border: 2px dashed #0d9488; background: #f0fdfa; color: #2a1a0f; line-height: 1.7; font-size: 15px; }
   .summary.highlight { border-color: #0d9488; background: #ccfbf1; border-style: solid; border-width: 3px; font-size: 17px; }
   .summary.core { border-color: #dc2626; background: #fee2e2; border-width: 3px; }
@@ -3759,10 +3757,12 @@ function buildReportHtml(studentId, log, summary) {
   <p><strong>Student / Class:</strong> ${escapeHtml(studentId)}</p>
   <p><strong>Words logged this session:</strong> ${log.length}</p>
   ${sectionsHtml}
-  <table>
-    <thead><tr><th>Word</th><th>Clue Type</th><th>Stage Reached</th><th>Hints</th><th></th></tr></thead>
-    <tbody>${rows || '<tr><td colspan="5">No words logged yet.</td></tr>'}</tbody>
-  </table>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Word</th><th>Clue Type</th><th>Stage Reached</th><th>Hints</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="5">No words logged yet.</td></tr>'}</tbody>
+    </table>
+  </div>
   <p class="hint">Opened this file in your browser? Use your browser's own Print or Save-as-PDF option (usually Ctrl+P or Cmd+P) to print or save it.</p>
 </body>
 </html>`;
@@ -4410,11 +4410,6 @@ function DiagnosticReportSkeleton() {
         {bar("w-full", "bg-red-300/40")}
         {bar("w-4/5 mx-auto", "bg-red-300/40")}
       </div>
-      <div className="p-6 rounded-3xl space-y-2.5" style={{ background: "#ffedd5", border: "4px solid #c2410c" }}>
-        {bar("w-40 mx-auto", "bg-orange-300/60")}
-        {bar("w-full", "bg-orange-300/40")}
-        {bar("w-3/5 mx-auto", "bg-orange-300/40")}
-      </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="p-5 rounded-3xl space-y-2.5" style={{ background: "#dbeafe", border: "3px solid #2563eb" }}>
           {bar("w-24", "bg-blue-300/60")}
@@ -4483,11 +4478,10 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
       try {
         const raw = await callClaude(DIAGNOSTIC_SYSTEM_PROMPT, [userMsg]);
         const parsed = safeParseJSON(raw);
-        if (parsed && parsed.coreProblem) {
+        if (parsed && parsed.corePattern) {
           const nextSummary = {
             summary: parsed.summary || "",
-            coreProblem: parsed.coreProblem,
-            whatThisMeans: parsed.whatThisMeans || "",
+            corePattern: parsed.corePattern,
             howReliable: parsed.howReliable || "",
             storyUnderstandingNote: parsed.storyUnderstandingNote || "",
             whatToTry: parsed.whatToTry || "",
@@ -4597,7 +4591,7 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
               biggest and boldest, everything else is opt-in detail below. */}
           <div className="p-7 rounded-3xl text-center bounce-in" style={{ background: "linear-gradient(135deg,#ccfbf1,#99f6e4)", border: "4px solid #0d9488" }}>
             <p className="font-display font-800 text-xs uppercase tracking-wide text-teal-800 mb-2">📌 Summary</p>
-            <p className="font-display font-800 text-xl sm:text-2xl leading-snug text-teal-950">{summary.summary || summary.coreProblem}</p>
+            <p className="font-display font-800 text-xl sm:text-2xl leading-snug text-teal-950">{summary.summary || summary.corePattern || summary.coreProblem}</p>
           </div>
 
           {/* At a Glance / Story Understanding: plain counts, not prose,
@@ -4652,25 +4646,19 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
                 <span className="flex items-center gap-1.5"><i className="inline-block w-3.5 h-3.5 rounded" style={{ background: "#fee2e2", border: "2px solid #dc2626" }} /> Headline diagnosis</span>
               </div>
 
-              {/* 1. Core Problem */}
+              {/* 1. The Pattern */}
               <div className="p-6 rounded-3xl text-center" style={{ background: "#fee2e2", border: "4px solid #dc2626" }}>
-                <p className="font-display font-800 text-xs uppercase tracking-wide text-red-800 mb-2">🎯 The Core Problem</p>
-                <RichReportText text={summary.coreProblem} className="text-red-900" boldColorClass="text-red-950 font-800" />
+                <p className="font-display font-800 text-xs uppercase tracking-wide text-red-800 mb-2">🎯 The Pattern</p>
+                <RichReportText text={summary.corePattern || summary.coreProblem} className="text-red-900" boldColorClass="text-red-950 font-800" />
               </div>
 
-              {/* 2. What This Actually Means */}
-              <div className="p-6 rounded-3xl text-center" style={{ background: "#ffedd5", border: "4px solid #c2410c" }}>
-                <p className="font-display font-800 text-xs uppercase tracking-wide text-orange-900 mb-2">💭 What This Actually Means</p>
-                <RichReportText text={summary.whatThisMeans} className="text-orange-950" boldColorClass="text-orange-950 font-800" />
-              </div>
-
-              {/* 3. How Reliable Is This */}
+              {/* 2. How Reliable Is This */}
               <div className="p-6 rounded-3xl" style={{ background: "#fef3c7", border: "4px solid #d97706" }}>
                 <p className="font-display font-800 text-xs uppercase tracking-wide text-amber-800 mb-2">🧠 How Reliable Is This</p>
                 <RichReportText text={summary.howReliable} className="text-amber-900" boldColorClass="text-amber-950 font-800" />
               </div>
 
-              {/* 4. What To Try */}
+              {/* 3. What To Try */}
               <div className="p-6 rounded-3xl" style={{ background: "linear-gradient(135deg,#fef3c7,#fde68a)", border: "4px solid #d97706" }}>
                 <p className="font-display font-800 text-xs uppercase tracking-wide text-amber-800 mb-2">💡 What To Try in Class</p>
                 <RichReportText text={summary.whatToTry} className="text-amber-900" boldColorClass="text-amber-950 font-800" />
@@ -4694,9 +4682,9 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
         const distinctMaps = [...new Set(log.map((e) => e.passageTitle).filter(Boolean))];
         const showMapColumn = distinctMaps.length > 1;
         return (
-          <div className="bg-white border-4 rounded-2xl mb-6 overflow-hidden relative z-10" style={{ borderColor: "#b45309" }}>
+          <div className="bg-white rounded-3xl mb-6 overflow-hidden relative z-10" style={{ border: "3px solid #2563eb" }}>
             <table className="w-full text-left">
-              <thead className="bg-amber-50 border-b-2 border-amber-300">
+              <thead className="bg-blue-50 border-b-2 border-blue-200">
                 <tr>
                   <th className="font-display font-700 text-[11px] uppercase tracking-wide text-stone-500 px-4 py-3">Word</th>
                   {showMapColumn && <th className="font-display font-700 text-[11px] uppercase tracking-wide text-stone-500 px-4 py-3">Map</th>}
@@ -4710,7 +4698,7 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
                   <tr><td colSpan={showMapColumn ? 5 : 4} className="px-4 py-8 text-center font-hand text-lg text-stone-500">No words logged yet. Have the student solve a few words first!</td></tr>
                 )}
                 {log.map((entry, i) => (
-                  <tr key={i} className={`border-b border-amber-100 last:border-0 ${entry.skipped ? "bg-rose-50" : ""}`}>
+                  <tr key={i} className={`border-b border-blue-100 last:border-0 ${entry.skipped ? "bg-rose-50" : ""}`}>
                     <td className="px-4 py-3 font-display font-700 text-stone-700">
                       {entry.word}
                       {entry.skipped && <span className="ml-2 font-body font-700 text-[10px] uppercase text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full">Skipped</span>}
