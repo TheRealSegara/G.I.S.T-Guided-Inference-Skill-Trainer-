@@ -161,6 +161,52 @@ function Sparkle({ count = 8 }) {
   );
 }
 
+// Decorative cartoon cloud silhouette, used for the passage screen's
+// not-yet-reachable placeholders and its reveal button. Purely visual
+// (aria-hidden), so it can freely stretch/crop to whatever box it's
+// dropped into via preserveAspectRatio="slice" rather than needing an
+// exact-fit viewBox per call site.
+function CloudShape({ fill = "#e0f2fe", className = "" }) {
+  return (
+    <svg viewBox="0 0 200 80" width="100%" height="100%" preserveAspectRatio="xMidYMid slice" className={className} aria-hidden="true">
+      <ellipse cx="45" cy="46" rx="34" ry="24" fill={fill} />
+      <ellipse cx="90" cy="30" rx="38" ry="28" fill={fill} />
+      <ellipse cx="140" cy="42" rx="36" ry="26" fill={fill} />
+      <ellipse cx="175" cy="52" rx="26" ry="18" fill={fill} />
+      <rect x="18" y="42" width="164" height="28" rx="14" fill={fill} />
+    </svg>
+  );
+}
+
+// Puff-of-cloud burst, fired when a new part of the passage is revealed.
+// Same particle-burst mechanic as Sparkle (reuses its .sparkle-piece
+// animation, which is just translate+scale+opacity, not sparkle-specific),
+// with a cloud emoji instead so it reads as "the cloud drifted away."
+function CloudPuff({ count = 6 }) {
+  const pieces = Array.from({ length: count }).map((_, i) => {
+    const angle = (i / count) * Math.PI * 2;
+    const dist = 26 + Math.random() * 18;
+    return {
+      sx: `${Math.cos(angle) * dist}px`,
+      sy: `${Math.sin(angle) * dist}px`,
+      delay: `${Math.random() * 0.08}s`,
+    };
+  });
+  return (
+    <span className="absolute inset-0 pointer-events-none" aria-hidden="true" style={{ zIndex: 30 }}>
+      {pieces.map((p, i) => (
+        <span
+          key={i}
+          className="sparkle-piece absolute left-1/2 top-1/2 text-sm"
+          style={{ "--sx": p.sx, "--sy": p.sy, animationDelay: p.delay }}
+        >
+          ☁️
+        </span>
+      ))}
+    </span>
+  );
+}
+
 /* ---------------- Content data ---------------- */
 function PaperGrain() {
   return (
@@ -622,7 +668,7 @@ Respond with ONLY valid, compact JSON, no markdown fences, no extra text, in exa
 }
 The "words" array must have exactly ${wordCount} entries.`;
 
-const DIAGNOSTIC_SYSTEM_PROMPT = `You are the G.I.S.T. diagnostic engine. G.I.S.T. is purely an assessment tool, it exists to reveal what a student understands, not to be the thing they get taught with again. You read a log of a Malaysian primary school ESL student's completed vocabulary coaching session and produce five separate pieces of teacher-facing output.
+const DIAGNOSTIC_SYSTEM_PROMPT = `You are the G.I.S.T. diagnostic engine. G.I.S.T. is purely an assessment tool, it exists to reveal what a student understands, not to be the thing they get taught with again. You read a log of a Malaysian primary school ESL student's completed vocabulary coaching session and produce six separate pieces of teacher-facing output: a one-glance summary plus the five detailed parts below it.
 
 Each log entry contains: the word, its clueType (contrast, definition, example, or inference), its concreteness (abstract or concrete), the stage the student needed to reach to resolve it (1-5, higher means they needed more support), how many hints they used, whether the word was skipped, whether they reported seeing the word before ("priorKnowledge": yes/no/not_sure), how they say they got it ("gotItVia": knew/clues/guessed), which clue phrase they identified as helping them (if any), how long they took to answer in seconds ("timeToAnswerSec"), and, for at most one word this session, a transfer test result (whether they could use the word correctly in a brand-new sentence, "transferPassed": true/false/null). You are also given the whole-passage comprehension check result (correct or incorrect) and the question/answer involved. You may also be given optional teacher notes about the session's context (e.g. "right after recess," "usually stronger with reading"), factor these in wherever relevant, they explain circumstances the log alone can't show, they don't override what the data actually shows.
 
@@ -639,9 +685,15 @@ HARD RULES for all parts, not optional:
 - If the log is too short for a confident pattern (fewer than 3 non-skipped entries), say so plainly in whichever section it affects, and just report what happened with those specific words instead of generalising.
 
 FORMAT RULES for all parts, not optional, this creates real visual hierarchy instead of a wall of text:
-- Each field (except storyUnderstandingNote) must be written as: ONE short bolded headline sentence on its own line, then a blank line, then 2-4 bullet points, each on its own line starting with "- ". Use literal "\\n" characters in the JSON string for line breaks, never write it all as one flowing paragraph.
+- Every sentence you write, in every field including "summary", under 12 words, never more than 15. Short, plain, direct sentences, not dense compound ones, a busy teacher reading this between classes shouldn't have to re-read a sentence to parse it.
+- Each field (except "summary" and storyUnderstandingNote) must be written as: ONE short bolded headline sentence on its own line, then a blank line, then 2-4 bullet points, each on its own line starting with "- ". Use literal "\\n" characters in the JSON string for line breaks, never write it all as one flowing paragraph.
 - Each bullet must be short, one specific point, one piece of evidence. Don't write a bullet longer than one sentence.
 - storyUnderstandingNote is short enough (1-2 sentences) to stay as plain text, no bullets needed there, but the bold-evidence rule still applies.
+
+PART 0 — "summary" (1-2 plain sentences, no bullets, no bold):
+- The single takeaway a teacher needs in 5 seconds, before reading anything else. Plainer and simpler than every other field, this is the one a teacher reads even if they read nothing else.
+- State the one clearest pattern in the plainest possible words, e.g. "Ahmad understands words that are explained directly, but not words he has to work out from a hint." Name at most one word as a light example, don't pack in evidence, that's what the sections below are for.
+- No markdown, no bullets, no bold asterisks, just two short plain sentences.
 
 PART 1 — "coreProblem" (headline + up to 3 bullets):
 - Headline: describe this student the way you'd describe them to another teacher, not a word-category scorecard. Fuse two things into one read: the specific word-level pattern (which kind of clue trips them up, in plain words) AND the session-level arc, did their hint use or response time get better or worse as the session went on, did skips cluster near the end (a fatigue signal, different from a difficulty signal), did they seem to engage less over time. Only claim a session-level arc if the data actually supports it (roughly 4+ non-skipped entries with real variation), otherwise stick to the word-level pattern alone.
@@ -666,6 +718,7 @@ PART 5 — "whatToTry" (headline + 2-3 bullets):
 
 Respond with ONLY valid JSON, no markdown fences, no extra text, in exactly this shape:
 {
+  "summary": "string",
   "coreProblem": "string",
   "whatThisMeans": "string",
   "howReliable": "string",
@@ -2003,26 +2056,38 @@ function ProgressTrail({ words, solvedWords, avatarConfig, totalMilestone }) {
 }
 
 /* ---------------- Passage Screen ---------------- */
-// White-to-charcoal progression for not-yet-reachable passage sentences,
-// so a glance at the stack of placeholders shows how much story is still
-// ahead: near-white right after the revealable one, darkening toward the
-// very last sentence. Each {bg, text} pair is pre-checked at 4.5:1+
-// contrast (WCAG AA) rather than interpolated live, so a middle shade in
-// the gradient can't accidentally land on a low-contrast combination.
-const UNREVEALED_SHADES = [
-  { bg: "#f5f5f4", text: "#57534e" },
-  { bg: "#d6d3d1", text: "#44403c" },
-  { bg: "#a8a29e", text: "#1c1917" },
-  { bg: "#78716c", text: "#ffffff" },
-  { bg: "#44403c", text: "#fafaf9" },
-];
+// Pastel cloud-bank progression for not-yet-reachable passage sentences,
+// so a glance at the stack of placeholder clouds shows how much story is
+// still ahead: the cloud right after the revealable one is a touch more
+// solid/defined, and each one further out is paler and hazier, reading
+// naturally as "the story fades into the distance." Purely decorative
+// (no text sits on these anymore), so there's no WCAG contrast pairing
+// to maintain, unlike the shade+text combo this replaced.
+const CLOUD_SHADES = ["#7dd3fc", "#9fe0fb", "#c3ecfc", "#e0f6fd", "#f5fbfe"];
 
-function unrevealedShade(t) {
-  const idx = Math.round(t * (UNREVEALED_SHADES.length - 1));
-  return UNREVEALED_SHADES[Math.max(0, Math.min(UNREVEALED_SHADES.length - 1, idx))];
+function cloudShade(t) {
+  const idx = Math.round(t * (CLOUD_SHADES.length - 1));
+  return CLOUD_SHADES[Math.max(0, Math.min(CLOUD_SHADES.length - 1, idx))];
 }
 
 function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, onSwitchStudent, avatarConfig, totalLogCount, streakMsg, studentId, log, sessionStartedAt, revealedCount, onRevealNext }) {
+  // Fires a CloudPuff over whichever sentence was just revealed, briefly,
+  // then clears itself. Tracked here (rather than in the button, which
+  // unmounts the instant revealedCount changes) so the animation attaches
+  // to the newly-revealed paragraph sliding into view instead.
+  const [puffIndex, setPuffIndex] = useState(null);
+  const prevRevealedCount = useRef(revealedCount);
+  useEffect(() => {
+    if (revealedCount > prevRevealedCount.current) {
+      const justRevealed = revealedCount - 1;
+      setPuffIndex(justRevealed);
+      const t = setTimeout(() => setPuffIndex(null), 700);
+      prevRevealedCount.current = revealedCount;
+      return () => clearTimeout(t);
+    }
+    prevRevealedCount.current = revealedCount;
+  }, [revealedCount]);
+
   const milestone =
     totalLogCount >= 20 ? { emoji: "🏆", title: "Legendary Explorer", subtitle: "20+ words solved!" } :
     totalLogCount >= 10 ? { emoji: "🗺️", title: "Map Master", subtitle: "10+ words solved!" } :
@@ -2080,7 +2145,8 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, onSwit
     return sentences.map((sentence, i) => {
       if (i < revealedCount) {
         return (
-          <p key={i} className="mb-3 last:mb-0 step-in flex items-start gap-1.5" style={{ breakInside: "avoid" }}>
+          <p key={i} className="relative mb-3 last:mb-0 step-in flex items-start gap-1.5" style={{ breakInside: "avoid" }}>
+            {puffIndex === i && <CloudPuff />}
             <span>{highlightWords(sentence.trim(), `s${i}-`)}</span>
             <button
               onClick={() => speak(sentence.trim())}
@@ -2098,29 +2164,33 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, onSwit
           <button
             key={i}
             onClick={() => { SFX.pageTurn(); onRevealNext(); }}
-            className="w-full text-left mb-3 px-4 py-3 rounded-xl bg-stone-100 hover:bg-stone-200 transition-all font-hand text-lg text-stone-600 italic step-in"
+            className="group relative w-full mb-3 h-14 rounded-2xl overflow-hidden transition-transform hover:scale-[1.02] step-in"
             style={{ breakInside: "avoid" }}
           >
-            🔒 tap to reveal the next part of the story…
+            <CloudShape fill="#bae6fd" className="absolute inset-0 transition-transform group-hover:scale-105" />
+            <span className="relative z-10 flex items-center justify-center h-full font-hand text-lg text-sky-900 italic">
+              🔒 tap to reveal the next part of the story…
+            </span>
           </button>
         );
       }
       // Sentences further ahead than the next revealable one: shown as a
-      // placeholder (not left blank) so the passage box is already at its
-      // full final height from the start, instead of visibly growing every
-      // time a part gets revealed. Darkens the further away it is.
+      // drifting cloud placeholder (not left blank) so the passage box is
+      // already at its full final height from the start, instead of
+      // visibly growing every time a part gets revealed. Fades paler the
+      // further away it is.
       const totalUpcoming = sentences.length - (revealedCount + 1);
       const posAmongUpcoming = i - (revealedCount + 1);
       const t = totalUpcoming > 1 ? posAmongUpcoming / (totalUpcoming - 1) : 0;
-      const shade = unrevealedShade(t);
+      const shade = cloudShade(t);
       return (
         <div
           key={i}
           aria-hidden="true"
-          className="w-full mb-3 px-4 py-3 rounded-xl font-hand text-base italic step-in"
-          style={{ background: shade.bg, color: shade.text, breakInside: "avoid" }}
+          className="w-full mb-3 h-14 rounded-2xl overflow-hidden step-in"
+          style={{ breakInside: "avoid" }}
         >
-          This part of the story isn't currently available.
+          <CloudShape fill={shade} />
         </div>
       );
     });
@@ -3645,6 +3715,7 @@ function buildReportHtml(studentId, log, summary) {
     .join("");
   const sections = summary
     ? [
+        { label: "📌 Summary", text: summary.summary, cls: "highlight" },
         { label: "🎯 The Core Problem", text: summary.coreProblem, cls: "core" },
         { label: "💭 What This Actually Means", text: summary.whatThisMeans, cls: "" },
         { label: "🧠 How Reliable Is This", text: summary.howReliable, cls: "" },
@@ -3672,6 +3743,7 @@ function buildReportHtml(studentId, log, summary) {
   th, td { border: 1px solid #d6b370; padding: 8px 12px; text-align: left; font-size: 14px; background: #ffffff; color: #2a1a0f; }
   th { background: #fef3c7; }
   .summary { margin-top: 16px; padding: 16px; border: 2px dashed #0d9488; background: #f0fdfa; color: #2a1a0f; line-height: 1.7; font-size: 15px; }
+  .summary.highlight { border-color: #0d9488; background: #ccfbf1; border-style: solid; border-width: 3px; font-size: 17px; }
   .summary.core { border-color: #dc2626; background: #fee2e2; border-width: 3px; }
   .summary.rec { border-color: #d97706; background: #fffbeb; }
   .summary h2 { font-size: 15px; margin: 0 0 8px 0; }
@@ -4328,6 +4400,11 @@ function DiagnosticReportSkeleton() {
   const bar = (widthClass, toneClass) => <div className={`h-3 ${widthClass} ${toneClass} rounded-full animate-pulse`} />;
   return (
     <div className="relative z-10 mb-6 space-y-4 step-in" aria-hidden="true">
+      <div className="p-7 rounded-3xl space-y-2.5" style={{ background: "linear-gradient(135deg,#ccfbf1,#99f6e4)", border: "4px solid #0d9488" }}>
+        {bar("w-24 mx-auto", "bg-teal-400/50")}
+        {bar("w-full h-4", "bg-teal-400/40")}
+        {bar("w-3/4 mx-auto h-4", "bg-teal-400/40")}
+      </div>
       <div className="p-6 rounded-3xl space-y-2.5" style={{ background: "#fee2e2", border: "4px solid #dc2626" }}>
         {bar("w-32 mx-auto", "bg-red-300/60")}
         {bar("w-full", "bg-red-300/40")}
@@ -4369,6 +4446,7 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [showFullDetails, setShowFullDetails] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [teacherNotes, setTeacherNotes] = useState("");
   const quotaStatus = useQuotaStatus();
@@ -4407,6 +4485,7 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
         const parsed = safeParseJSON(raw);
         if (parsed && parsed.coreProblem) {
           const nextSummary = {
+            summary: parsed.summary || "",
             coreProblem: parsed.coreProblem,
             whatThisMeans: parsed.whatThisMeans || "",
             howReliable: parsed.howReliable || "",
@@ -4475,7 +4554,8 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
         <div className="mb-6 p-4 rounded-2xl bg-sky-50 border-2 border-sky-200 step-in font-body text-sm text-stone-700 leading-relaxed">
           <p className="mb-2"><strong>How to use this:</strong> the student plays through a map during a supervised session, and every word attempt is logged automatically.</p>
           <p className="mb-2">Tap "Generate diagnostic summary" for a full evidence-based report, then "Download results" to save a copy, opens in any browser and can be printed to PDF from there if needed. For a signed-in student, this session also saves to their account automatically, so you can find it again later in the File Box on the main menu, without needing the download.</p>
-          <p>Colors mean something: <b>blue</b> boxes are counted directly from the log, no AI involved. <b>Amber</b> boxes are AI-written analysis. The <b>red</b> box is the single headline diagnosis, built from the amber boxes' evidence.</p>
+          <p className="mb-2">The <b>teal Summary</b> box up top is the one thing to read if you're short on time. <b>Blue</b> boxes below it are counted directly from the log, no AI involved.</p>
+          <p>Tap "See full details" for the rest: <b>red</b> is the single headline diagnosis, <b>amber</b> boxes are the AI's written evidence and analysis behind it.</p>
         </div>
       )}
 
@@ -4513,26 +4593,15 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
 
       {summary && (
         <div className="relative z-10 mb-6 space-y-4 step-in">
-          {/* Legend */}
-          <div className="flex items-center justify-center gap-5 flex-wrap font-display font-800 text-[11px] uppercase tracking-wide text-stone-500">
-            <span className="flex items-center gap-1.5"><i className="inline-block w-3.5 h-3.5 rounded" style={{ background: "#dbeafe", border: "2px solid #2563eb" }} /> Counted directly</span>
-            <span className="flex items-center gap-1.5"><i className="inline-block w-3.5 h-3.5 rounded" style={{ background: "#fef3c7", border: "2px solid #d97706" }} /> AI-analyzed</span>
-            <span className="flex items-center gap-1.5"><i className="inline-block w-3.5 h-3.5 rounded" style={{ background: "#fee2e2", border: "2px solid #dc2626" }} /> Headline diagnosis</span>
+          {/* Summary: the one thing a teacher needs in 5 seconds, shown
+              biggest and boldest, everything else is opt-in detail below. */}
+          <div className="p-7 rounded-3xl text-center bounce-in" style={{ background: "linear-gradient(135deg,#ccfbf1,#99f6e4)", border: "4px solid #0d9488" }}>
+            <p className="font-display font-800 text-xs uppercase tracking-wide text-teal-800 mb-2">📌 Summary</p>
+            <p className="font-display font-800 text-xl sm:text-2xl leading-snug text-teal-950">{summary.summary || summary.coreProblem}</p>
           </div>
 
-          {/* 1. Core Problem */}
-          <div className="p-6 rounded-3xl text-center" style={{ background: "#fee2e2", border: "4px solid #dc2626" }}>
-            <p className="font-display font-800 text-xs uppercase tracking-wide text-red-800 mb-2">🎯 The Core Problem</p>
-            <RichReportText text={summary.coreProblem} className="text-red-900" boldColorClass="text-red-950 font-800" />
-          </div>
-
-          {/* 2. What This Actually Means */}
-          <div className="p-6 rounded-3xl text-center" style={{ background: "#ffedd5", border: "4px solid #c2410c" }}>
-            <p className="font-display font-800 text-xs uppercase tracking-wide text-orange-900 mb-2">💭 What This Actually Means</p>
-            <RichReportText text={summary.whatThisMeans} className="text-orange-950" boldColorClass="text-orange-950 font-800" />
-          </div>
-
-          {/* 3 + Story Understanding: At a Glance / Story Understanding */}
+          {/* At a Glance / Story Understanding: plain counts, not prose,
+              so these stay visible by default even with details collapsed. */}
           <div className="grid grid-cols-2 gap-4">
             <div className="p-5 rounded-3xl" style={{ background: "#dbeafe", border: "3px solid #2563eb" }}>
               <p className="font-display font-800 text-xs uppercase tracking-wide text-blue-800 mb-3">📊 At a Glance</p>
@@ -4566,17 +4635,48 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
             </div>
           </div>
 
-          {/* 4. How Reliable Is This */}
-          <div className="p-6 rounded-3xl" style={{ background: "#fef3c7", border: "4px solid #d97706" }}>
-            <p className="font-display font-800 text-xs uppercase tracking-wide text-amber-800 mb-2">🧠 How Reliable Is This</p>
-            <RichReportText text={summary.howReliable} className="text-amber-900" boldColorClass="text-amber-950 font-800" />
+          <div className="text-center">
+            <button
+              onClick={() => { SFX.tap(); setShowFullDetails((s) => !s); }}
+              className="font-display font-700 text-sm text-teal-700 hover:text-teal-900 bg-white rounded-full px-5 py-2 border-2 border-teal-300 shadow-sm"
+            >
+              {showFullDetails ? "▲ Hide full details" : "▼ See full details"}
+            </button>
           </div>
 
-          {/* 5. What To Try */}
-          <div className="p-6 rounded-3xl" style={{ background: "linear-gradient(135deg,#fef3c7,#fde68a)", border: "4px solid #d97706" }}>
-            <p className="font-display font-800 text-xs uppercase tracking-wide text-amber-800 mb-2">💡 What To Try in Class</p>
-            <RichReportText text={summary.whatToTry} className="text-amber-900" boldColorClass="text-amber-950 font-800" />
-          </div>
+          {showFullDetails && (
+            <div className="space-y-4 step-in">
+              {/* Legend */}
+              <div className="flex items-center justify-center gap-5 flex-wrap font-display font-800 text-[11px] uppercase tracking-wide text-stone-500">
+                <span className="flex items-center gap-1.5"><i className="inline-block w-3.5 h-3.5 rounded" style={{ background: "#fef3c7", border: "2px solid #d97706" }} /> AI-analyzed</span>
+                <span className="flex items-center gap-1.5"><i className="inline-block w-3.5 h-3.5 rounded" style={{ background: "#fee2e2", border: "2px solid #dc2626" }} /> Headline diagnosis</span>
+              </div>
+
+              {/* 1. Core Problem */}
+              <div className="p-6 rounded-3xl text-center" style={{ background: "#fee2e2", border: "4px solid #dc2626" }}>
+                <p className="font-display font-800 text-xs uppercase tracking-wide text-red-800 mb-2">🎯 The Core Problem</p>
+                <RichReportText text={summary.coreProblem} className="text-red-900" boldColorClass="text-red-950 font-800" />
+              </div>
+
+              {/* 2. What This Actually Means */}
+              <div className="p-6 rounded-3xl text-center" style={{ background: "#ffedd5", border: "4px solid #c2410c" }}>
+                <p className="font-display font-800 text-xs uppercase tracking-wide text-orange-900 mb-2">💭 What This Actually Means</p>
+                <RichReportText text={summary.whatThisMeans} className="text-orange-950" boldColorClass="text-orange-950 font-800" />
+              </div>
+
+              {/* 3. How Reliable Is This */}
+              <div className="p-6 rounded-3xl" style={{ background: "#fef3c7", border: "4px solid #d97706" }}>
+                <p className="font-display font-800 text-xs uppercase tracking-wide text-amber-800 mb-2">🧠 How Reliable Is This</p>
+                <RichReportText text={summary.howReliable} className="text-amber-900" boldColorClass="text-amber-950 font-800" />
+              </div>
+
+              {/* 4. What To Try */}
+              <div className="p-6 rounded-3xl" style={{ background: "linear-gradient(135deg,#fef3c7,#fde68a)", border: "4px solid #d97706" }}>
+                <p className="font-display font-800 text-xs uppercase tracking-wide text-amber-800 mb-2">💡 What To Try in Class</p>
+                <RichReportText text={summary.whatToTry} className="text-amber-900" boldColorClass="text-amber-950 font-800" />
+              </div>
+            </div>
+          )}
 
           <div className="text-center">
             <BigButton
@@ -4683,7 +4783,7 @@ function TeacherGuideScreen({ onBack }) {
 
       <Section icon="📔" title="The diagnostic report">
         <p>Every word attempt during a session is logged automatically (which word, how many hints it took, whether it was skipped, and more). That log is what actually gets analyzed — nothing about the report is guessed or generic.</p>
-        <p>Colors mean something on the report screen: <b>blue</b> boxes are counted directly from the log, no AI involved. <b>Amber</b> boxes are the AI's written analysis of that same log. The <b>red</b> box is a single headline diagnosis, built from the amber boxes' evidence.</p>
+        <p>The report opens with a one-line <b>teal Summary</b> and the <b>blue</b> count boxes, counted directly from the log, no AI involved. Tap "See full details" for the rest: the <b>red</b> headline diagnosis and the <b>amber</b> boxes, the AI's written analysis behind it.</p>
       </Section>
 
       <Section icon="🗃️" title="The File Box">
