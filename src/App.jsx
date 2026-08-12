@@ -712,6 +712,47 @@ function clearCachedAuth() {
   }
 }
 
+/* ---------------- Student accounts (auth) ---------------- */
+// Same bridge pattern as the teacher access-token above, but for the
+// signed-in student (full name + 3-animal secret, see api/_studentAuth.js).
+// Separate token/storage from the teacher token: the teacher token proves
+// "this device is unlocked for School X," the student token additionally
+// proves "and this is specifically Ahmad," needed to save a session under
+// the right student_id.
+const STUDENT_AUTH_STORAGE_KEY = "gist_student_auth";
+let currentStudentToken = null;
+
+function loadCachedStudentAuth() {
+  try {
+    const raw = sessionStorage.getItem(STUDENT_AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.token || !parsed?.expiresAt || parsed.expiresAt < Date.now() || !parsed?.student) {
+      sessionStorage.removeItem(STUDENT_AUTH_STORAGE_KEY);
+      return null;
+    }
+    return parsed;
+  } catch (e) {
+    return null;
+  }
+}
+
+function saveCachedStudentAuth(token, expiresAt, student) {
+  try {
+    sessionStorage.setItem(STUDENT_AUTH_STORAGE_KEY, JSON.stringify({ token, expiresAt, student }));
+  } catch (e) {
+    /* sessionStorage unavailable; token just won't persist across reloads */
+  }
+}
+
+function clearCachedStudentAuth() {
+  try {
+    sessionStorage.removeItem(STUDENT_AUTH_STORAGE_KEY);
+  } catch (e) {
+    /* ignore */
+  }
+}
+
 /* ---------------- Quota tracking (client-side, per-device estimate) ---------------- */
 // The real quota is enforced server-side (api/_claudeHandler.js) no
 // matter what this cache says — this exists only to drive a "X of Y
@@ -792,6 +833,73 @@ async function callClaude(systemPrompt, messages) {
   if (data?.quota) saveQuotaCache({ used: data.quota.used, limit: data.quota.limit });
   const textBlocks = (data.content || []).filter((b) => b.type === "text").map((b) => b.text);
   return textBlocks.join("");
+}
+
+// Shared fetch wrapper for the student-account endpoints (student-auth,
+// session, teacher-roster). `token` is whichever bearer token the call
+// needs (teacher or student, callers pass the right one explicitly since
+// unlike callClaude these aren't all teacher-scoped).
+async function apiRequest(path, { method = "GET", body, token } = {}) {
+  const response = await fetch(path, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const err = new Error(data?.error || "Request failed");
+    err.status = response.status;
+    throw err;
+  }
+  return data;
+}
+
+// Return the raw {token, expiresAt, student} rather than persisting it
+// here, same shape as AccessGateScreen's onUnlocked(token, expiresAt):
+// the caller (App's onStudentAuthenticated) is what updates React state
+// and sessionStorage together, so currentStudentToken only ever changes
+// via the same effect-driven path studentAuth already uses, never a
+// side channel that state could later stomp back to stale.
+async function studentSignup(fullName, secretSequence, avatarConfig) {
+  const data = await apiRequest("/api/student-auth", {
+    method: "POST",
+    token: currentAuthToken,
+    body: { mode: "signup", fullName, secret: secretSequence, avatarConfig },
+  });
+  return data;
+}
+
+async function studentLogin(fullName, secretSequence) {
+  const data = await apiRequest("/api/student-auth", {
+    method: "POST",
+    token: currentAuthToken,
+    body: { mode: "login", fullName, secret: secretSequence },
+  });
+  return data;
+}
+
+async function saveSession(payload) {
+  return apiRequest("/api/session", { method: "POST", token: currentStudentToken, body: payload });
+}
+
+async function fetchTeacherRoster() {
+  const data = await apiRequest("/api/teacher-roster", { token: currentAuthToken });
+  return data.students;
+}
+
+async function fetchStudentSessions(studentId) {
+  return apiRequest(`/api/teacher-roster?studentId=${encodeURIComponent(studentId)}`, { token: currentAuthToken });
+}
+
+async function fetchSessionDetail(sessionId) {
+  return apiRequest(`/api/session?sessionId=${encodeURIComponent(sessionId)}`, { token: currentAuthToken });
+}
+
+async function cacheSessionDiagnostic(sessionId, diagnosticReport) {
+  return apiRequest("/api/session", { method: "PATCH", token: currentAuthToken, body: { sessionId, diagnosticReport } });
 }
 
 // Failures the server can't resolve by simply being asked again: retrying
@@ -933,8 +1041,63 @@ function MakerResultSkeleton() {
   );
 }
 
+// Must match SECRET_LENGTH in api/_studentAuth.js.
+const SECRET_LENGTH = 3;
+
+// Controlled 3-tap animal sequence picker: used both to CHOOSE a new
+// secret at signup and to RE-ENTER an existing one at login (the tap
+// interaction is identical either way; the copy around it, handled by
+// the caller, is what differs). Deliberately a separate pool of taps
+// from CompanionGrid's coach-companion picker below, even though it
+// draws on the same ANIMAL_COMPANIONS list — the point is this choice
+// never appears on screen again after signup, unlike the visible coach
+// companion, so a classmate who's watched someone play can't just read
+// their password off the screen.
+function SecretAnimalPicker({ value, onChange }) {
+  return (
+    <div>
+      <div className="flex items-center justify-center gap-2.5 mb-4">
+        {Array.from({ length: SECRET_LENGTH }).map((_, i) => {
+          const filled = value[i];
+          const animal = filled ? ANIMAL_COMPANIONS.find((a) => a.id === filled) : null;
+          return (
+            <div
+              key={i}
+              className="w-14 h-14 rounded-full flex items-center justify-center text-2xl bg-white"
+              style={{ border: animal ? "3px solid #0d9488" : "3px dashed #d6d3d1" }}
+            >
+              {animal ? animal.emoji : <span className="text-stone-300 text-xl">?</span>}
+            </div>
+          );
+        })}
+      </div>
+      <div className="grid grid-cols-4 gap-2.5">
+        {ANIMAL_COMPANIONS.map((a) => (
+          <button
+            key={a.id}
+            onClick={() => { if (value.length < SECRET_LENGTH) { SFX.tap(); onChange([...value, a.id]); } }}
+            disabled={value.length >= SECRET_LENGTH}
+            className="flex flex-col items-center gap-0.5 p-2.5 rounded-2xl bg-white transition-all hover:scale-105 disabled:opacity-40 disabled:hover:scale-100"
+            style={{ border: "2px solid #e7e5e4" }}
+            aria-label={a.label}
+          >
+            <span className="text-2xl">{a.emoji}</span>
+          </button>
+        ))}
+      </div>
+      {value.length > 0 && (
+        <div className="text-center mt-3">
+          <button onClick={() => { SFX.click(); onChange([]); }} className="font-body text-xs text-stone-500 underline hover:text-stone-700">
+            Start over
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------------- Setup Screen ---------------- */
-function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoReport, bilingual, onToggleBilingual }) {
+function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoReport, bilingual, onToggleBilingual, onStudentAuthenticated, onOpenFileBox }) {
   const [mode, setMode] = useState(null); // null (main menu) | "tour" | "play" | "maker"
   const [step, setStep] = useState(1);
   const [studentId, setStudentId] = useState("");
@@ -946,6 +1109,20 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
   // demand from "How to play"). Tracked separately from `mode` since both
   // entry points land on the same mode === "tour" screen.
   const [afterTour, setAfterTour] = useState("wizard");
+
+  // New/returning student sign-up and login (mode === "student-choice" |
+  // "student-signup" | "student-login"). A new student's chosen secret is
+  // carried forward (not submitted yet) through the tutorial and the
+  // avatar-builder wizard steps, since the account is only actually
+  // created once the whole avatarConfig is assembled, at the final
+  // "Start my adventure" confirm — pendingSignup marks that a signup
+  // call is still owed at that point, vs. a returning student who's
+  // already authenticated and just needs onBegin().
+  const [authName, setAuthName] = useState("");
+  const [authSecret, setAuthSecret] = useState([]);
+  const [pendingSignup, setPendingSignup] = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState(null);
 
   // Unknown status (null, e.g. localStorage unavailable) fails open:
   // better to let a session start than block on missing information we
@@ -1061,7 +1238,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
 
   const StepDots = () => (
     <div className="flex items-center justify-center gap-2 mb-8">
-      {[1, 2, 3, 4].map((n) => (
+      {[1, 2, 3].map((n) => (
         <div
           key={n}
           className={`h-2.5 rounded-full transition-all ${
@@ -1128,7 +1305,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
               <p className="font-body text-sm text-stone-600 leading-relaxed mb-5 max-w-[220px]">
                 Choose a map and work through the words with your coach, tapping, spelling, and typing your way to each answer.
               </p>
-              <BigButton onClick={() => { setAfterTour("wizard"); setStep(1); setMode("tour"); }}>
+              <BigButton onClick={() => { setAuthError(null); setMode("student-choice"); }}>
                 <Play className="inline w-4 h-4 mr-1.5 fill-current" /> Start Playing
               </BigButton>
               <button
@@ -1152,14 +1329,24 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
               <BigButton variant="outline" onClick={() => { setMode("maker"); setMakerSaved(false); }}>
                 <Wrench className="inline w-4 h-4 mr-1.5" /> Create a Custom Map
               </BigButton>
-              {onViewDemoReport && (
-                <button
-                  onClick={() => { SFX.tap(); onViewDemoReport(); }}
-                  className="mt-3 font-body text-xs text-stone-600 underline hover:text-stone-800"
-                >
-                  🔦 See a sample report
-                </button>
-              )}
+              <div className="flex items-center gap-3 mt-3 flex-wrap justify-center">
+                {onViewDemoReport && (
+                  <button
+                    onClick={() => { SFX.tap(); onViewDemoReport(); }}
+                    className="font-body text-xs text-stone-600 underline hover:text-stone-800"
+                  >
+                    🔦 See a sample report
+                  </button>
+                )}
+                {onOpenFileBox && (
+                  <button
+                    onClick={() => { SFX.tap(); onOpenFileBox(); }}
+                    className="font-body text-xs text-stone-600 underline hover:text-stone-800"
+                  >
+                    🗃️ File Box
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -1183,7 +1370,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
               <BigButton variant="ghost" onClick={resetMakerAndGoMenu}>
                 <ChevronLeft className="inline w-4 h-4 mr-1" /> Main menu
               </BigButton>
-              <BigButton onClick={() => { setMakerSaved(false); setMode("play"); setStep(1); }}>
+              <BigButton onClick={() => { setMakerSaved(false); setAuthError(null); setMode("student-choice"); }}>
                 <Play className="inline w-4 h-4 mr-1.5 fill-current" /> Start Playing <ArrowRight className="inline w-4 h-4 ml-1" />
               </BigButton>
             </div>
@@ -1327,6 +1514,155 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
     );
   }
 
+  /* -------- New vs returning student, right after "Start Playing" -------- */
+  if (mode === "student-choice") {
+    return (
+      <div className="max-w-md mx-auto px-6 py-8 step-in min-h-screen flex flex-col justify-center relative">
+        <FloatingDecor density={5} />
+        <div className="bg-white p-8 step-in relative z-10 text-center" style={DECKLE}>
+          <p className="text-4xl mb-3">🧑‍🎓</p>
+          <h1 className="font-display font-800 text-xl text-stone-700 mb-2">Who's playing?</h1>
+          <p className="font-body text-sm text-stone-500 mb-6">This lets your teacher check your progress over time, not just today.</p>
+          <div className="flex flex-col gap-3">
+            <BigButton
+              onClick={() => {
+                SFX.tap();
+                setAuthName("");
+                setAuthSecret([]);
+                setAuthError(null);
+                setMode("student-signup");
+              }}
+            >
+              🆕 New Student
+            </BigButton>
+            <BigButton
+              variant="outline"
+              onClick={() => {
+                SFX.tap();
+                setAuthName("");
+                setAuthSecret([]);
+                setAuthError(null);
+                setMode("student-login");
+              }}
+            >
+              ↩️ Returning Student
+            </BigButton>
+          </div>
+          <button onClick={() => setMode(null)} className="mt-6 font-body text-xs text-stone-500 underline hover:text-stone-700">
+            Back to menu
+          </button>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+
+  /* -------- New student: name + secret (avatar collected later, in the
+     wizard, so the account is created once with its real avatarConfig
+     instead of a placeholder that would need a separate update call) -------- */
+  if (mode === "student-signup") {
+    const canContinue = authName.trim().length > 0 && authSecret.length === SECRET_LENGTH;
+    return (
+      <div className="max-w-md mx-auto px-6 py-8 step-in min-h-screen flex flex-col justify-center relative">
+        <FloatingDecor density={5} />
+        <div className="bg-white p-8 step-in relative z-10" style={DECKLE}>
+          <p className="text-4xl text-center mb-3">🆕</p>
+          <h1 className="font-display font-800 text-xl text-stone-700 text-center mb-1">New Student</h1>
+          <p className="font-body text-sm text-stone-500 text-center mb-5">
+            Enter your full name, then pick 3 secret animals, in order. Remember them, you'll need them to log back in!
+          </p>
+          <input
+            value={authName}
+            onChange={(e) => setAuthName(e.target.value)}
+            placeholder="Your full name"
+            maxLength={80}
+            autoComplete="off"
+            spellCheck={false}
+            className="w-full bg-amber-50 rounded-2xl border-2 border-amber-300 px-4 py-3.5 font-body text-lg text-stone-700 text-center focus:outline-none focus:border-amber-500 mb-5"
+            autoFocus
+          />
+          <SecretAnimalPicker value={authSecret} onChange={setAuthSecret} />
+          {authError && <p className="font-body text-xs text-rose-600 text-center mt-4" aria-live="polite">{authError}</p>}
+          <div className="flex items-center justify-center gap-3 mt-6">
+            <BigButton variant="ghost" onClick={() => setMode("student-choice")}>
+              <ChevronLeft className="inline w-4 h-4 mr-1" /> Back
+            </BigButton>
+            <BigButton
+              onClick={() => {
+                if (!canContinue) return;
+                SFX.click();
+                setStudentId(authName.trim());
+                setPendingSignup(true);
+                setAfterTour("wizard");
+                setMode("tour");
+              }}
+              disabled={!canContinue}
+            >
+              Continue <ArrowRight className="inline w-4 h-4 ml-1" />
+            </BigButton>
+          </div>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+
+  /* -------- Returning student: name + secret, verified immediately -------- */
+  if (mode === "student-login") {
+    const canSubmit = authName.trim().length > 0 && authSecret.length === SECRET_LENGTH;
+    async function handleLogin() {
+      if (!canSubmit) return;
+      SFX.click();
+      setAuthLoading(true);
+      setAuthError(null);
+      try {
+        const data = await studentLogin(authName.trim(), authSecret);
+        onStudentAuthenticated(data.token, data.expiresAt, data.student);
+        setStudentId(data.student.fullName);
+        setAvatarConfig(data.student.avatarConfig);
+        setPendingSignup(false);
+        setAuthSecret([]);
+        setStep(3);
+        setMode("play");
+      } catch (e) {
+        setAuthError(e.message || "Couldn't log in, please try again");
+      } finally {
+        setAuthLoading(false);
+      }
+    }
+    return (
+      <div className="max-w-md mx-auto px-6 py-8 step-in min-h-screen flex flex-col justify-center relative">
+        <FloatingDecor density={5} />
+        <div className="bg-white p-8 step-in relative z-10" style={DECKLE}>
+          <p className="text-4xl text-center mb-3">↩️</p>
+          <h1 className="font-display font-800 text-xl text-stone-700 text-center mb-1">Returning Student</h1>
+          <p className="font-body text-sm text-stone-500 text-center mb-5">Enter your full name and your 3 secret animals, in order.</p>
+          <input
+            value={authName}
+            onChange={(e) => setAuthName(e.target.value)}
+            placeholder="Your full name"
+            maxLength={80}
+            autoComplete="off"
+            spellCheck={false}
+            className="w-full bg-amber-50 rounded-2xl border-2 border-amber-300 px-4 py-3.5 font-body text-lg text-stone-700 text-center focus:outline-none focus:border-amber-500 mb-5"
+            autoFocus
+          />
+          <SecretAnimalPicker value={authSecret} onChange={setAuthSecret} />
+          {authError && <p className="font-body text-xs text-rose-600 text-center mt-4" aria-live="polite">{authError}</p>}
+          <div className="flex items-center justify-center gap-3 mt-6">
+            <BigButton variant="ghost" onClick={() => setMode("student-choice")}>
+              <ChevronLeft className="inline w-4 h-4 mr-1" /> Back
+            </BigButton>
+            <BigButton onClick={handleLogin} disabled={!canSubmit || authLoading}>
+              {authLoading ? "Logging in…" : "Log in"} <ArrowRight className="inline w-4 h-4 ml-1" />
+            </BigButton>
+          </div>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+
   /* -------- Tutorial: shown right after "Start Playing" (before the setup
      wizard), or on demand via "How to play" for a returning student -------- */
   if (mode === "tour") {
@@ -1353,28 +1689,6 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
         <div className="flex-1 min-h-0 flex flex-col justify-center">
 
       {step === 1 && (
-        <div className="bg-white p-8 step-in relative z-10 max-w-md mx-auto w-full" style={DECKLE}>
-          <p className="text-4xl text-center mb-4">👋</p>
-          <h1 className="font-display font-800 text-xl text-stone-700 block mb-4 text-center">What's your name or class number?</h1>
-          <input
-            value={studentId}
-            onChange={(e) => setStudentId(e.target.value)}
-            placeholder="e.g. Year4-Aiman"
-            className="w-full bg-amber-50 rounded-2xl border-2 border-amber-300 px-4 py-4 font-body text-xl text-stone-700 text-center focus:outline-none focus:border-amber-500 placeholder:text-stone-400"
-            autoFocus
-          />
-          <div className="flex items-center justify-center gap-3 mt-6">
-            <BigButton variant="ghost" onClick={() => setMode(null)}>
-              <ChevronLeft className="inline w-4 h-4 mr-1" /> Main menu
-            </BigButton>
-            <BigButton onClick={() => studentId.trim() && setStep(2)} disabled={!studentId.trim()}>
-              Next <ArrowRight className="inline w-4 h-4 ml-1" />
-            </BigButton>
-          </div>
-        </div>
-      )}
-
-      {step === 2 && (
         <div className="bg-white p-6 sm:p-8 step-in relative z-10" style={KID_CARD}>
           <div className="flex items-center gap-3 mb-5 bg-white rounded-2xl px-5 py-3" style={{ border: "2px solid #b45309" }}>
             <span className="text-3xl">🐾</span>
@@ -1385,17 +1699,17 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
           </div>
           <CompanionGrid selected={avatarConfig.companion} onSelect={(id) => setAvatarConfig((c) => ({ ...c, companion: id }))} />
           <div className="flex items-center justify-center gap-3 mt-6">
-            <BigButton variant="ghost" onClick={() => setStep(1)}>
-              <ChevronLeft className="inline w-4 h-4 mr-1" /> Back
+            <BigButton variant="ghost" onClick={() => setMode(null)}>
+              <ChevronLeft className="inline w-4 h-4 mr-1" /> Main menu
             </BigButton>
-            <BigButton onClick={() => avatarConfig.companion && setStep(3)} disabled={!avatarConfig.companion}>
+            <BigButton onClick={() => avatarConfig.companion && setStep(2)} disabled={!avatarConfig.companion}>
               Next <ArrowRight className="inline w-4 h-4 ml-1" />
             </BigButton>
           </div>
         </div>
       )}
 
-      {step === 3 && (
+      {step === 2 && (
         <div className="step-in relative z-10 max-h-full overflow-y-auto">
           <h1 className="font-display font-800 text-xl text-stone-700 block mb-3 text-center bg-white/70 rounded-xl py-1.5">Build your explorer</h1>
 
@@ -1487,17 +1801,17 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
           </div>
 
           <div className="flex items-center justify-center gap-3 mt-6">
-            <BigButton variant="ghost" onClick={() => setStep(2)}>
+            <BigButton variant="ghost" onClick={() => setStep(1)}>
               <ChevronLeft className="inline w-4 h-4 mr-1" /> Back
             </BigButton>
-            <BigButton onClick={() => setStep(4)}>
+            <BigButton onClick={() => setStep(3)}>
               Next <ArrowRight className="inline w-4 h-4 ml-1" />
             </BigButton>
           </div>
         </div>
       )}
 
-      {step === 4 && (
+      {step === 3 && (
         <div className="bg-white p-6 sm:p-8 step-in relative z-10 max-h-full overflow-y-auto" style={KID_CARD}>
           <div className="flex items-center gap-3 mb-5 bg-white rounded-2xl px-5 py-3" style={{ border: "2px solid #b45309" }}>
             <span className="text-3xl">🗺️</span>
@@ -1551,15 +1865,41 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
             </p>
           )}
 
+          {authError && (
+            <p className="font-body text-xs text-rose-600 text-center mt-4" aria-live="polite">
+              {authError}
+            </p>
+          )}
+
           <div className="flex items-center justify-center gap-3 mt-6">
-            <BigButton variant="ghost" onClick={() => setStep(3)}>
+            <BigButton variant="ghost" onClick={() => setStep(2)}>
               <ChevronLeft className="inline w-4 h-4 mr-1" /> Back
             </BigButton>
             <BigButton
-              onClick={() => passageId && onBegin(studentId.trim(), avatarConfig, passageId, SESSION_WORD_COUNT)}
-              disabled={!passageId || !canAffordSession}
+              onClick={async () => {
+                if (!passageId) return;
+                if (!pendingSignup) {
+                  onBegin(studentId.trim(), avatarConfig, passageId, SESSION_WORD_COUNT);
+                  return;
+                }
+                SFX.click();
+                setAuthLoading(true);
+                setAuthError(null);
+                try {
+                  const data = await studentSignup(studentId.trim(), authSecret, avatarConfig);
+                  onStudentAuthenticated(data.token, data.expiresAt, data.student);
+                  setPendingSignup(false);
+                  setAuthSecret([]);
+                  onBegin(studentId.trim(), avatarConfig, passageId, SESSION_WORD_COUNT);
+                } catch (e) {
+                  setAuthError(e.message || "Couldn't create the account, please try again");
+                } finally {
+                  setAuthLoading(false);
+                }
+              }}
+              disabled={!passageId || !canAffordSession || authLoading}
             >
-              Start my adventure <ArrowRight className="inline w-4 h-4 ml-1" />
+              {authLoading ? "Creating account…" : "Start my adventure"} <ArrowRight className="inline w-4 h-4 ml-1" />
             </BigButton>
           </div>
         </div>
@@ -1674,7 +2014,7 @@ function unrevealedShade(t) {
   return UNREVEALED_SHADES[Math.max(0, Math.min(UNREVEALED_SHADES.length - 1, idx))];
 }
 
-function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, avatarConfig, totalLogCount, streakMsg, studentId, log, sessionStartedAt, revealedCount, onRevealNext }) {
+function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, onSwitchStudent, avatarConfig, totalLogCount, streakMsg, studentId, log, sessionStartedAt, revealedCount, onRevealNext }) {
   const milestone =
     totalLogCount >= 20 ? { emoji: "🏆", title: "Legendary Explorer", subtitle: "20+ words solved!" } :
     totalLogCount >= 10 ? { emoji: "🗺️", title: "Map Master", subtitle: "10+ words solved!" } :
@@ -1792,6 +2132,15 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, avatar
         <CompassRose size={36} />
         <p className="font-display font-800 text-xl sticker-title">G.I.S.T.</p>
         <SessionTimer startedAt={sessionStartedAt} className="ml-auto font-mono text-xs text-stone-500 bg-white rounded-full px-3 py-1.5 border-2 border-stone-300" />
+        {onSwitchStudent && (
+          <button
+            onClick={() => { SFX.tap(); onSwitchStudent(); }}
+            className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-2 border-stone-300 shadow-sm"
+            title="Save this device for the next student"
+          >
+            <RotateCcw className="w-3.5 h-3.5" /> New Student
+          </button>
+        )}
         <button onClick={() => { SFX.tap(); onOpenTeacher(); }} className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-2 border-stone-300 shadow-sm">
           <GraduationCap className="w-3.5 h-3.5" /> Teacher view
         </button>
@@ -4003,8 +4352,8 @@ function DiagnosticReportSkeleton() {
   );
 }
 
-function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comprehensionResult, isDemo = false }) {
-  const [summary, setSummary] = useState(null);
+function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comprehensionResult, isDemo = false, initialSummary = null, onDiagnosticGenerated = null, hideResetSection = false }) {
+  const [summary, setSummary] = useState(initialSummary);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
@@ -4045,13 +4394,15 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
         const raw = await callClaude(DIAGNOSTIC_SYSTEM_PROMPT, [userMsg]);
         const parsed = safeParseJSON(raw);
         if (parsed && parsed.coreProblem) {
-          setSummary({
+          const nextSummary = {
             coreProblem: parsed.coreProblem,
             whatThisMeans: parsed.whatThisMeans || "",
             howReliable: parsed.howReliable || "",
             storyUnderstandingNote: parsed.storyUnderstandingNote || "",
             whatToTry: parsed.whatToTry || "",
-          });
+          };
+          setSummary(nextSummary);
+          onDiagnosticGenerated?.(nextSummary);
           SFX.reportReady();
           setLoading(false);
           return;
@@ -4081,7 +4432,13 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
           <ChevronLeft className="w-3.5 h-3.5" /> Back
         </button>
         <div className="flex items-center gap-2">
-          <SessionTimer startedAt={sessionStartedAt} className="font-mono text-xs text-stone-500 bg-white rounded-full px-3 py-1.5 border-2 border-stone-200" />
+          {hideResetSection ? (
+            <span className="font-mono text-xs text-stone-500 bg-white rounded-full px-3 py-1.5 border-2 border-stone-200">
+              📅 {sessionStartedAt ? new Date(sessionStartedAt).toLocaleDateString() : "Past session"}
+            </span>
+          ) : (
+            <SessionTimer startedAt={sessionStartedAt} className="font-mono text-xs text-stone-500 bg-white rounded-full px-3 py-1.5 border-2 border-stone-200" />
+          )}
           <button onClick={() => setShowHelp((s) => !s)} className="font-display font-700 text-xs text-stone-500 bg-white rounded-full px-3 py-1.5 border-2 border-stone-200">
             ℹ️ How this works
           </button>
@@ -4258,11 +4615,179 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
         );
       })()}
 
-      <div className="mt-10 pt-6 border-t-2 border-stone-200 flex items-center justify-between flex-wrap gap-2 relative z-10">
-        <p className="font-body text-[11px] text-stone-500">Clears this session's log. Print or save your results first if you need them.</p>
-        <BigButton variant="ghost" onClick={onReset}>
-          <RotateCcw className="inline w-3 h-3 mr-1" /> Clear session
-        </BigButton>
+      {!hideResetSection && (
+        <div className="mt-10 pt-6 border-t-2 border-stone-200 flex items-center justify-between flex-wrap gap-2 relative z-10">
+          <p className="font-body text-[11px] text-stone-500">Clears this session's log. Print or save your results first if you need them.</p>
+          <BigButton variant="ghost" onClick={onReset}>
+            <RotateCcw className="inline w-3 h-3 mr-1" /> Clear session
+          </BigButton>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Teacher File Box ---------------- */
+// The teacher-facing view of persisted student progress: every student
+// who has signed up under this device's access code, and their past
+// sessions. Three internal views (roster -> a student's sessions -> one
+// session's full report) rather than separate screen types, since all
+// three share the same back-and-forth navigation and none of them are
+// ever reachable except through this one entry point.
+function FileBoxScreen({ onBack }) {
+  const [view, setView] = useState("roster"); // "roster" | "sessions" | "detail"
+  const [roster, setRoster] = useState(null);
+  const [rosterLoading, setRosterLoading] = useState(true);
+  const [rosterError, setRosterError] = useState(null);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [sessions, setSessions] = useState(null);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsError, setSessionsError] = useState(null);
+  const [selectedSession, setSelectedSession] = useState(null);
+  const [sessionDetail, setSessionDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRosterLoading(true);
+    setRosterError(null);
+    fetchTeacherRoster()
+      .then((students) => { if (!cancelled) setRoster(students); })
+      .catch((e) => { if (!cancelled) setRosterError(e.message || "Couldn't load the roster"); })
+      .finally(() => { if (!cancelled) setRosterLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  function openStudent(student) {
+    SFX.tap();
+    setSelectedStudent(student);
+    setSessions(null);
+    setSessionsError(null);
+    setSessionsLoading(true);
+    setView("sessions");
+    fetchStudentSessions(student.id)
+      .then((data) => setSessions(data.sessions))
+      .catch((e) => setSessionsError(e.message || "Couldn't load this student's sessions"))
+      .finally(() => setSessionsLoading(false));
+  }
+
+  function openSession(session) {
+    SFX.tap();
+    setSelectedSession(session);
+    setSessionDetail(null);
+    setDetailError(null);
+    setDetailLoading(true);
+    setView("detail");
+    fetchSessionDetail(session.id)
+      .then((data) => setSessionDetail(data))
+      .catch((e) => setDetailError(e.message || "Couldn't load this session"))
+      .finally(() => setDetailLoading(false));
+  }
+
+  if (view === "detail") {
+    if (!detailLoading && sessionDetail) {
+      return (
+        <TeacherScreen
+          studentId={sessionDetail.session.studentName}
+          log={sessionDetail.log}
+          comprehensionResult={sessionDetail.session.comprehensionResult}
+          sessionStartedAt={new Date(sessionDetail.session.startedAt).getTime()}
+          initialSummary={sessionDetail.session.diagnosticReport}
+          onDiagnosticGenerated={(summary) => cacheSessionDiagnostic(sessionDetail.session.id, summary).catch(() => {})}
+          onBack={() => setView("sessions")}
+          onReset={() => setView("sessions")}
+          hideResetSection
+        />
+      );
+    }
+    return (
+      <div className="max-w-2xl mx-auto px-6 py-8 step-in min-h-screen flex flex-col justify-center relative">
+        <FloatingDecor density={4} />
+        <div className="bg-white p-8 step-in relative z-10 text-center" style={DECKLE}>
+          {detailLoading ? (
+            <p className="font-hand text-xl text-stone-500">Loading this session…</p>
+          ) : (
+            <>
+              <p className="font-body text-sm text-rose-600 mb-4">{detailError || "Couldn't load this session"}</p>
+              <BigButton variant="ghost" onClick={() => setView("sessions")}>
+                <ChevronLeft className="inline w-4 h-4 mr-1" /> Back
+              </BigButton>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (view === "sessions") {
+    return (
+      <div className="max-w-2xl mx-auto px-6 py-8 step-in relative min-h-screen">
+        <FloatingDecor density={4} />
+        <button onClick={() => setView("roster")} className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-2 border-stone-200 relative z-10 mb-5 ml-14">
+          <ChevronLeft className="w-3.5 h-3.5" /> Back to roster
+        </button>
+        <h1 className="font-display text-2xl font-800 text-stone-700 mb-1 relative z-10">🗃️ {selectedStudent?.fullName}'s sessions</h1>
+        <p className="font-body text-xs text-stone-500 mb-5 relative z-10">Tap a session to see its full diagnostic report.</p>
+
+        {sessionsLoading && <p className="font-hand text-lg text-stone-500 relative z-10">Loading…</p>}
+        {sessionsError && <p className="font-body text-sm text-rose-600 relative z-10">{sessionsError}</p>}
+        {sessions && sessions.length === 0 && (
+          <p className="font-body text-sm text-stone-500 relative z-10">No completed sessions yet for this student.</p>
+        )}
+        <div className="flex flex-col gap-2.5 relative z-10">
+          {sessions?.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => openSession(s)}
+              className="flex items-center gap-3 text-left px-4 py-3.5 bg-white rounded-2xl hover:scale-[1.01] transition-all"
+              style={{ border: "2px solid #e7e5e4" }}
+            >
+              <span className="text-2xl shrink-0">{s.passageEmoji || "📖"}</span>
+              <div className="flex-1">
+                <p className="font-display font-800 text-sm text-stone-700">{s.passageTitle}</p>
+                <p className="font-body text-xs text-stone-500">
+                  {new Date(s.finishedAt).toLocaleDateString()} · {s.wordCount} word{s.wordCount === 1 ? "" : "s"}
+                  {s.comprehensionCorrect !== null ? ` · comprehension ${s.comprehensionCorrect ? "✓" : "✗"}` : ""}
+                </p>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // view === "roster"
+  return (
+    <div className="max-w-2xl mx-auto px-6 py-8 step-in relative min-h-screen">
+      <FloatingDecor density={5} />
+      <button onClick={onBack} className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-2 border-stone-200 relative z-10 mb-5 ml-14">
+        <ChevronLeft className="w-3.5 h-3.5" /> Back to menu
+      </button>
+      <h1 className="font-display text-2xl font-800 text-stone-700 mb-1 relative z-10">🗃️ File Box</h1>
+      <p className="font-body text-xs text-stone-500 mb-5 relative z-10">Every student who's signed up under this access code, and their past progress.</p>
+
+      {rosterLoading && <p className="font-hand text-lg text-stone-500 relative z-10">Loading…</p>}
+      {rosterError && <p className="font-body text-sm text-rose-600 relative z-10">{rosterError}</p>}
+      {roster && roster.length === 0 && (
+        <p className="font-body text-sm text-stone-500 relative z-10">No students yet. They'll show up here once someone signs up as a new student.</p>
+      )}
+      <div className="flex flex-col gap-2.5 relative z-10">
+        {roster?.map((s) => (
+          <button
+            key={s.id}
+            onClick={() => openStudent(s)}
+            className="flex items-center justify-between text-left px-4 py-3.5 bg-white rounded-2xl hover:scale-[1.01] transition-all"
+            style={{ border: "2px solid #e7e5e4" }}
+          >
+            <p className="font-display font-800 text-sm text-stone-700">{s.fullName}</p>
+            <p className="font-body text-xs text-stone-500">
+              {s.sessionCount} session{s.sessionCount === 1 ? "" : "s"}
+              {s.lastSessionAt ? ` · last played ${new Date(s.lastSessionAt).toLocaleDateString()}` : ""}
+            </p>
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -4353,10 +4878,15 @@ export default function App() {
   const [bilingual, setBilingual] = useState(false);
   const [revealedCount, setRevealedCount] = useState(1);
   const [authInfo, setAuthInfo] = useState(() => loadCachedAuth());
+  const [studentAuth, setStudentAuth] = useState(() => loadCachedStudentAuth());
 
   useEffect(() => {
     currentAuthToken = authInfo?.token || null;
   }, [authInfo]);
+
+  useEffect(() => {
+    currentStudentToken = studentAuth?.token || null;
+  }, [studentAuth]);
 
   useEffect(() => {
     onAuthInvalidated = () => { clearCachedAuth(); setAuthInfo(null); };
@@ -4437,6 +4967,22 @@ export default function App() {
     setSolvedWords([]);
   }
 
+  // Hands the device off to the next student: clears this student's
+  // identity and in-progress session state and returns to the main menu,
+  // without needing to close and reopen the whole app (which would also
+  // discard the teacher's access-code session).
+  function handleSwitchStudent() {
+    clearCachedStudentAuth();
+    currentStudentToken = null;
+    setStudentAuth(null);
+    setLog([]);
+    setSolvedWords([]);
+    setStudentId("");
+    setAvatarConfig(DEFAULT_AVATAR_CONFIG);
+    setComprehensionResult(null);
+    setScreen("setup");
+  }
+
   if (!authInfo) {
     return (
       <div className="min-h-screen text-stone-700" style={{ fontFamily: "ui-sans-serif, system-ui", background: "linear-gradient(180deg,#FFF6DE 0%,#FFE9AD 55%,#FFDD85 100%)" }}>
@@ -4491,7 +5037,21 @@ export default function App() {
         <SoundToggle soundOn={soundOn} onToggle={() => { const next = !soundOn; setSoundOn(next); setSoundEnabledGlobal(next); }} />
       )}
       <main>
-        {screen === "setup" && <SetupScreen onBegin={handleBegin} customPassages={customPassages} onSaveCustomPassage={handleSaveCustomPassage} onViewDemoReport={() => setScreen("demo-report")} bilingual={bilingual} onToggleBilingual={() => setBilingual((b) => !b)} />}
+        {screen === "setup" && (
+          <SetupScreen
+            onBegin={handleBegin}
+            customPassages={customPassages}
+            onSaveCustomPassage={handleSaveCustomPassage}
+            onViewDemoReport={() => setScreen("demo-report")}
+            bilingual={bilingual}
+            onToggleBilingual={() => setBilingual((b) => !b)}
+            onStudentAuthenticated={(token, expiresAt, student) => {
+              saveCachedStudentAuth(token, expiresAt, student);
+              setStudentAuth({ token, expiresAt, student });
+            }}
+            onOpenFileBox={() => setScreen("file-box")}
+          />
+        )}
         {screen === "demo-report" && (
           <TeacherScreen
             studentId="Sample Student"
@@ -4503,6 +5063,7 @@ export default function App() {
             isDemo
           />
         )}
+        {screen === "file-box" && <FileBoxScreen onBack={() => setScreen("setup")} />}
         {screen === "passage" && (
           <PassageScreen
             passage={passage}
@@ -4513,6 +5074,7 @@ export default function App() {
               setScreen("coach");
             }}
             onOpenTeacher={() => setScreen("teacher")}
+            onSwitchStudent={handleSwitchStudent}
             avatarConfig={avatarConfig}
             totalLogCount={log.length}
             streakMsg={streakMsg}
@@ -4540,7 +5102,24 @@ export default function App() {
           <ComprehensionScreen
             passage={passage}
             avatarConfig={avatarConfig}
-            onDone={(result) => { setComprehensionResult(result); setScreen("recap"); }}
+            onDone={(result) => {
+              setComprehensionResult(result);
+              // Best-effort, same philosophy as the quota cache: a failed
+              // save shouldn't block the recap screen the student is
+              // waiting on, it just means this session won't show up in
+              // the teacher's File Box later.
+              if (studentAuth) {
+                saveSession({
+                  passageTitle: passage.title,
+                  passageEmoji: passage.emoji,
+                  startedAt: sessionStartedAt,
+                  finishedAt: Date.now(),
+                  comprehensionResult: result,
+                  log,
+                }).catch(() => {});
+              }
+              setScreen("recap");
+            }}
           />
         )}
         {screen === "recap" && (

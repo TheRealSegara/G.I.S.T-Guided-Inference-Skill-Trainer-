@@ -89,7 +89,7 @@ export default async function authHandler(req, res) {
   }
 
   const exp = Date.now() + TOKEN_TTL_MINUTES * 60_000;
-  const token = signToken({ label: match.label, exp }, secret);
+  const token = signToken({ kind: "teacher", label: match.label, exp }, secret);
   // dailyLimit lets the frontend show/estimate a quota indicator before
   // any /api/claude call has happened yet this session; the authoritative
   // used/remaining counts come from each /api/claude response itself.

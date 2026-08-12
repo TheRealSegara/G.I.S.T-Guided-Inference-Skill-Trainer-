@@ -8,6 +8,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import claudeHandler from "./api/_claudeHandler.js";
 import authHandler from "./api/_authHandler.js";
+import studentAuthHandler from "./api/_studentAuthHandler.js";
+import sessionHandler from "./api/_sessionHandler.js";
+import teacherRosterHandler from "./api/_teacherRosterHandler.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, "dist");
@@ -65,6 +68,12 @@ function withErrorBoundary(handler) {
 app.all("/api/claude", withErrorBoundary(claudeHandler));
 
 app.all("/api/auth", withErrorBoundary(authHandler));
+
+app.all("/api/student-auth", withErrorBoundary(studentAuthHandler));
+
+app.all("/api/session", withErrorBoundary(sessionHandler));
+
+app.all("/api/teacher-roster", withErrorBoundary(teacherRosterHandler));
 
 app.use(express.static(distDir));
 app.get("*", (req, res) => {

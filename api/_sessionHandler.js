@@ -1,0 +1,274 @@
+// Shared handler for saving and reading a session (one passage attempt),
+// used by both api/session.js (Vercel) and server.js.
+//
+// POST: a student saves their own just-finished session (student token).
+// GET: a teacher reads a specific past session's full log, gated by
+//   ownership (the session's student must belong to the requesting
+//   teacher token's access_code_label, so a guessed/leaked session UUID
+//   from another school reveals nothing).
+// PATCH: a teacher caches the AI-generated diagnostic report against a
+//   session they already fetched, so reopening it later in the File Box
+//   doesn't re-spend AI quota regenerating the same summary.
+
+import { verifyToken } from "./_auth.js";
+import { isOriginAllowed, getClientIp, pruneIfLarge, isPlainObjectWithOnlyKeys } from "./_shared.js";
+import { getSupabase } from "./_supabase.js";
+
+const MAX_WORDS_PER_SESSION = 10; // generous margin over SESSION_WORD_COUNT (5)
+const MAX_STRING = 500;
+
+const SAVE_ALLOWED_KEYS = ["passageTitle", "passageEmoji", "startedAt", "finishedAt", "comprehensionResult", "log"];
+const LOG_ENTRY_ALLOWED_KEYS = [
+  "word", "clueType", "concreteness", "finalStage", "hintsUsed", "skipped", "revealedMeaning",
+  "priorKnowledge", "gotItVia", "clueIdentified", "transferPassed", "timeToAnswerSec", "solvedAt", "passageTitle", "funFact",
+];
+const PATCH_ALLOWED_KEYS = ["sessionId", "diagnosticReport"];
+
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX_REQUESTS = 30;
+const requestLog = new Map();
+
+function isRateLimited(ip) {
+  pruneIfLarge(requestLog, 5000, (e) => Date.now() - e.windowStart > RATE_LIMIT_WINDOW_MS);
+  const now = Date.now();
+  const entry = requestLog.get(ip);
+  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+    requestLog.set(ip, { windowStart: now, count: 1 });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > RATE_LIMIT_MAX_REQUESTS;
+}
+
+function isValidShortString(v, max = MAX_STRING) {
+  return typeof v === "string" && v.length <= max;
+}
+
+function isValidTimestamp(v) {
+  return typeof v === "number" && Number.isFinite(v) && v > 0;
+}
+
+function validateComprehensionResult(c) {
+  if (c === null || c === undefined) return true;
+  if (typeof c !== "object" || Array.isArray(c)) return false;
+  const keys = ["ran", "correct", "question", "studentAnswer", "correctAnswer"];
+  if (!Object.keys(c).every((k) => keys.includes(k))) return false;
+  return true;
+}
+
+function validateLogEntry(entry) {
+  if (!isPlainObjectWithOnlyKeys(entry, LOG_ENTRY_ALLOWED_KEYS)) return false;
+  if (!isValidShortString(entry.word, 100)) return false;
+  if (typeof entry.finalStage !== "number") return false;
+  if (typeof entry.hintsUsed !== "number") return false;
+  if (typeof entry.skipped !== "boolean") return false;
+  if (!isValidTimestamp(entry.solvedAt)) return false;
+  return true;
+}
+
+async function handleSave(req, res, claims) {
+  if (claims.kind !== "student") {
+    return res.status(403).json({ error: "Only a student session can save progress" });
+  }
+  if (!isPlainObjectWithOnlyKeys(req.body, SAVE_ALLOWED_KEYS)) {
+    return res.status(400).json({ error: "Missing or unexpected fields in request body" });
+  }
+  const { passageTitle, passageEmoji, startedAt, finishedAt, comprehensionResult, log } = req.body;
+  if (!isValidShortString(passageTitle, 200)) return res.status(400).json({ error: "Invalid passage title" });
+  if (passageEmoji !== undefined && passageEmoji !== null && !isValidShortString(passageEmoji, 20)) {
+    return res.status(400).json({ error: "Invalid passage emoji" });
+  }
+  if (!isValidTimestamp(startedAt) || !isValidTimestamp(finishedAt)) {
+    return res.status(400).json({ error: "Invalid session timestamps" });
+  }
+  if (!validateComprehensionResult(comprehensionResult)) {
+    return res.status(400).json({ error: "Invalid comprehension result" });
+  }
+  if (!Array.isArray(log) || log.length === 0 || log.length > MAX_WORDS_PER_SESSION || !log.every(validateLogEntry)) {
+    return res.status(400).json({ error: "Invalid session log" });
+  }
+
+  const supabase = getSupabase();
+  if (!supabase) {
+    return res.status(500).json({ error: "Server is missing SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY" });
+  }
+
+  const { data: session, error: sessionError } = await supabase
+    .from("sessions")
+    .insert({
+      student_id: claims.studentId,
+      passage_title: passageTitle,
+      passage_emoji: passageEmoji || null,
+      started_at: new Date(startedAt).toISOString(),
+      finished_at: new Date(finishedAt).toISOString(),
+      comprehension_result: comprehensionResult || null,
+    })
+    .select("id")
+    .single();
+  if (sessionError || !session) {
+    return res.status(502).json({ error: "Couldn't save the session, please try again" });
+  }
+
+  const wordRows = log.map((entry) => ({
+    session_id: session.id,
+    word: entry.word,
+    clue_type: entry.clueType || null,
+    concreteness: entry.concreteness || null,
+    final_stage: entry.finalStage,
+    hints_used: entry.hintsUsed,
+    skipped: entry.skipped,
+    revealed_meaning: entry.revealedMeaning || null,
+    prior_knowledge: entry.priorKnowledge || null,
+    got_it_via: entry.gotItVia || null,
+    clue_identified: entry.clueIdentified || null,
+    transfer_passed: entry.transferPassed === undefined ? null : entry.transferPassed,
+    time_to_answer_sec: entry.timeToAnswerSec === undefined ? null : entry.timeToAnswerSec,
+    fun_fact: entry.funFact || null,
+    solved_at: new Date(entry.solvedAt).toISOString(),
+  }));
+  const { error: wordsError } = await supabase.from("session_words").insert(wordRows);
+  if (wordsError) {
+    // The session row exists but its words didn't save; still tell the
+    // client this failed rather than reporting false success, a partial
+    // record without any word log is worse than none for the teacher's
+    // File Box, and worth surfacing rather than hiding.
+    return res.status(502).json({ error: "Session saved but its word log failed, please tell your teacher" });
+  }
+
+  return res.status(200).json({ ok: true, sessionId: session.id });
+}
+
+async function handleFetch(req, res, claims) {
+  if (claims.kind === "student") {
+    return res.status(403).json({ error: "Teacher access required" });
+  }
+  const sessionId = typeof req.query?.sessionId === "string" ? req.query.sessionId : null;
+  if (!sessionId) {
+    return res.status(400).json({ error: "Missing sessionId" });
+  }
+
+  const supabase = getSupabase();
+  if (!supabase) {
+    return res.status(500).json({ error: "Server is missing SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY" });
+  }
+
+  const { data: session, error: sessionError } = await supabase
+    .from("sessions")
+    .select("id, passage_title, passage_emoji, started_at, finished_at, comprehension_result, diagnostic_report, teacher_notes, students!inner(id, full_name, access_code_label)")
+    .eq("id", sessionId)
+    .single();
+  if (sessionError || !session || session.students.access_code_label !== claims.label) {
+    return res.status(404).json({ error: "Session not found" });
+  }
+
+  const { data: words, error: wordsError } = await supabase
+    .from("session_words")
+    .select("word, clue_type, concreteness, final_stage, hints_used, skipped, revealed_meaning, prior_knowledge, got_it_via, clue_identified, transfer_passed, time_to_answer_sec, fun_fact, solved_at")
+    .eq("session_id", sessionId)
+    .order("solved_at", { ascending: true });
+  if (wordsError) {
+    return res.status(502).json({ error: "Couldn't load this session's word log" });
+  }
+
+  return res.status(200).json({
+    session: {
+      id: session.id,
+      studentId: session.students.id,
+      studentName: session.students.full_name,
+      passageTitle: session.passage_title,
+      passageEmoji: session.passage_emoji,
+      startedAt: session.started_at,
+      finishedAt: session.finished_at,
+      comprehensionResult: session.comprehension_result,
+      diagnosticReport: session.diagnostic_report,
+      teacherNotes: session.teacher_notes,
+    },
+    log: words.map((w) => ({
+      word: w.word,
+      clueType: w.clue_type,
+      concreteness: w.concreteness,
+      finalStage: w.final_stage,
+      hintsUsed: w.hints_used,
+      skipped: w.skipped,
+      revealedMeaning: w.revealed_meaning,
+      priorKnowledge: w.prior_knowledge,
+      gotItVia: w.got_it_via,
+      clueIdentified: w.clue_identified,
+      transferPassed: w.transfer_passed,
+      timeToAnswerSec: w.time_to_answer_sec,
+      funFact: w.fun_fact,
+      solvedAt: new Date(w.solved_at).getTime(),
+    })),
+  });
+}
+
+async function handlePatch(req, res, claims) {
+  if (claims.kind === "student") {
+    return res.status(403).json({ error: "Teacher access required" });
+  }
+  if (!isPlainObjectWithOnlyKeys(req.body, PATCH_ALLOWED_KEYS)) {
+    return res.status(400).json({ error: "Missing or unexpected fields in request body" });
+  }
+  const { sessionId, diagnosticReport } = req.body;
+  if (typeof sessionId !== "string" || !sessionId) {
+    return res.status(400).json({ error: "Missing sessionId" });
+  }
+  if (!diagnosticReport || typeof diagnosticReport !== "object" || Array.isArray(diagnosticReport)) {
+    return res.status(400).json({ error: "Invalid diagnostic report" });
+  }
+
+  const supabase = getSupabase();
+  if (!supabase) {
+    return res.status(500).json({ error: "Server is missing SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY" });
+  }
+
+  const { data: session, error: sessionError } = await supabase
+    .from("sessions")
+    .select("id, students!inner(access_code_label)")
+    .eq("id", sessionId)
+    .single();
+  if (sessionError || !session || session.students.access_code_label !== claims.label) {
+    return res.status(404).json({ error: "Session not found" });
+  }
+
+  const { error: updateError } = await supabase
+    .from("sessions")
+    .update({ diagnostic_report: diagnosticReport })
+    .eq("id", sessionId);
+  if (updateError) {
+    return res.status(502).json({ error: "Couldn't cache the diagnostic report" });
+  }
+  return res.status(200).json({ ok: true });
+}
+
+export default async function sessionHandler(req, res) {
+  if (!["POST", "GET", "PATCH"].includes(req.method)) {
+    res.setHeader("Allow", "POST, GET, PATCH");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  if (!isOriginAllowed(req)) {
+    return res.status(403).json({ error: "Origin not allowed" });
+  }
+
+  const ip = getClientIp(req);
+  if (isRateLimited(ip)) {
+    return res.status(429).json({ error: "Too many requests, please slow down" });
+  }
+
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) {
+    return res.status(500).json({ error: "Server is missing AUTH_SECRET" });
+  }
+
+  const authHeader = req.headers["authorization"] || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  const claims = verifyToken(token, secret);
+  if (!claims) {
+    return res.status(401).json({ error: "Missing or expired access token" });
+  }
+
+  if (req.method === "POST") return handleSave(req, res, claims);
+  if (req.method === "GET") return handleFetch(req, res, claims);
+  return handlePatch(req, res, claims);
+}
