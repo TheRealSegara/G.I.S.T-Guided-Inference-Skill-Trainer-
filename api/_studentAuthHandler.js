@@ -41,6 +41,51 @@ function isRateLimited(ip) {
   return entry.count > MAX_ATTEMPTS;
 }
 
+// Second, tighter layer against secret brute-forcing, on top of the
+// per-IP limiter above: the per-IP counter alone doesn't help against an
+// attacker spreading guesses across many IPs at a single student account,
+// which matters more here than usual because the secret space is
+// intentionally small (3 animals from a fixed set, by design). Keyed by
+// access_code_label + normalized name rather than by IP, same best-effort
+// in-memory Map pattern as requestLog/quotaLog in _claudeHandler.js (and
+// attemptLog above) — not a durable/shared store, but enough to stop an
+// automated guesser from just cycling IPs against one name.
+const LOGIN_FAIL_MAX = 5;
+const LOGIN_LOCKOUT_MS = 60_000;
+// How long a per-student entry with no recent failures and no active
+// lockout is kept around before pruneIfLarge is allowed to evict it.
+const LOGIN_FAIL_IDLE_MS = 5 * 60_000;
+const loginFailLog = new Map();
+
+function loginFailKey(label, nameKey) {
+  return `${label}::${nameKey}`;
+}
+
+function isLoginLocked(key) {
+  pruneIfLarge(
+    loginFailLog,
+    5000,
+    (e) => Date.now() > e.lockedUntil && Date.now() - e.lastFailAt > LOGIN_FAIL_IDLE_MS
+  );
+  const entry = loginFailLog.get(key);
+  return !!entry && Date.now() < entry.lockedUntil;
+}
+
+function recordLoginFailure(key) {
+  const entry = loginFailLog.get(key) || { count: 0, lockedUntil: 0, lastFailAt: 0 };
+  entry.count += 1;
+  entry.lastFailAt = Date.now();
+  if (entry.count >= LOGIN_FAIL_MAX) {
+    entry.lockedUntil = Date.now() + LOGIN_LOCKOUT_MS;
+    entry.count = 0; // require a fresh run of failures after the cooldown lifts
+  }
+  loginFailLog.set(key, entry);
+}
+
+function clearLoginFailures(key) {
+  loginFailLog.delete(key);
+}
+
 export default async function studentAuthHandler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -133,6 +178,11 @@ export default async function studentAuthHandler(req, res) {
   }
 
   // mode === "login"
+  const loginKey = loginFailKey(claims.label, nameKey);
+  if (isLoginLocked(loginKey)) {
+    return res.status(429).json({ error: "Too many failed attempts for this name, please wait a minute and try again" });
+  }
+
   const { data: student, error: lookupError } = await supabase
     .from("students")
     .select("id, full_name, avatar_config, secret_hash")
@@ -145,8 +195,10 @@ export default async function studentAuthHandler(req, res) {
   // Generic message either way (name not found vs secret mismatch) so a
   // wrong guess can't be used to enumerate which names are registered.
   if (!student || !secretHashesMatch(secretHash, student.secret_hash)) {
+    recordLoginFailure(loginKey);
     return res.status(401).json({ error: "Name or secret animals not recognized. Ask your teacher, or sign up as a new student." });
   }
+  clearLoginFailures(loginKey);
 
   await supabase.from("students").update({ last_login_at: new Date().toISOString() }).eq("id", student.id);
 

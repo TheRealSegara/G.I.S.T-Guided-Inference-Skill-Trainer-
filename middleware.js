@@ -32,6 +32,19 @@ function getAllowedOrigins() {
     .filter(Boolean);
 }
 
+// Prefix-matching an allowed origin with a bare .startsWith() lets
+// "https://your-app.vercel.app.evil.com" pass whenever
+// "https://your-app.vercel.app" is allowed, since the shorter string really
+// is a prefix of the longer one. Require either an exact match, or that the
+// allowed origin is followed immediately by "/" (a path on the same
+// origin/referer) — never a bareword continuation like ".evil.com" that
+// turns it into a different host entirely.
+function isOriginMatch(value, allowed) {
+  if (!value || !value.startsWith(allowed)) return false;
+  const nextChar = value.charAt(allowed.length);
+  return nextChar === "" || nextChar === "/";
+}
+
 export default function middleware(request) {
   if (!ALLOWED_METHODS.has(request.method)) {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
@@ -44,7 +57,7 @@ export default function middleware(request) {
   if (allowed.length > 0) {
     const origin = request.headers.get("origin") || "";
     const referer = request.headers.get("referer") || "";
-    const isAllowed = allowed.some((a) => origin.startsWith(a) || referer.startsWith(a));
+    const isAllowed = allowed.some((a) => isOriginMatch(origin, a) || isOriginMatch(referer, a));
     if (!isAllowed) {
       return new Response(JSON.stringify({ error: "Origin not allowed" }), {
         status: 403,

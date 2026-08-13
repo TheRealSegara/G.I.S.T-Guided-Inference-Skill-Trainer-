@@ -19,7 +19,7 @@ const MAX_STRING = 500;
 
 const SAVE_ALLOWED_KEYS = ["passageTitle", "passageEmoji", "startedAt", "finishedAt", "comprehensionResult", "log"];
 const LOG_ENTRY_ALLOWED_KEYS = [
-  "word", "clueType", "concreteness", "finalStage", "hintsUsed", "skipped", "revealedMeaning",
+  "word", "clueType", "concreteness", "finalStage", "hintsUsed", "skipped", "skipReason", "revealedMeaning",
   "priorKnowledge", "gotItVia", "clueIdentified", "transferPassed", "timeToAnswerSec", "solvedAt", "passageTitle", "funFact",
 ];
 const PATCH_ALLOWED_KEYS = ["sessionId", "diagnosticReport"];
@@ -44,15 +44,50 @@ function isValidShortString(v, max = MAX_STRING) {
   return typeof v === "string" && v.length <= max;
 }
 
+// Same as isValidShortString but also accepts the field being absent
+// entirely, for the many log-entry fields that are optional (e.g. a
+// skipped word has no gotItVia/clueIdentified).
+function isValidOptionalString(v, max) {
+  return v === undefined || v === null || isValidShortString(v, max);
+}
+
+function isValidOptionalBoolean(v) {
+  return v === undefined || v === null || typeof v === "boolean";
+}
+
+function isValidOptionalNumber(v) {
+  return v === undefined || v === null || (typeof v === "number" && Number.isFinite(v));
+}
+
 function isValidTimestamp(v) {
   return typeof v === "number" && Number.isFinite(v) && v > 0;
 }
+
+// Short, enum-like fields (clueType: contrast/definition/example/inference,
+// concreteness: abstract/concrete, priorKnowledge: yes/no/not_sure,
+// gotItVia: knew/clues/guessed) — the model/app only ever writes one of a
+// handful of short words here, so a generous 100-char cap is plenty and
+// still blocks anyone from stuffing something huge into these columns.
+const MAX_ENUM_LIKE = 100;
+// Free-text fields the AI coach fills in per turn (see buildCoachSystemPrompt
+// in src/App.jsx: "message" is capped at ~2 short sentences, fun_fact is a
+// short reward line) — 1000 chars is a generous margin over what the coach
+// actually produces, not a field meant to hold arbitrary long text.
+const MAX_FREE_TEXT = 1000;
+// clueIdentified is a short phrase from the passage the student tapped, not
+// a full free-text field, but can run a bit longer than a bare enum value.
+const MAX_CLUE_PHRASE = 500;
 
 function validateComprehensionResult(c) {
   if (c === null || c === undefined) return true;
   if (typeof c !== "object" || Array.isArray(c)) return false;
   const keys = ["ran", "correct", "question", "studentAnswer", "correctAnswer"];
   if (!Object.keys(c).every((k) => keys.includes(k))) return false;
+  if (typeof c.ran !== "boolean") return false;
+  if (!isValidOptionalBoolean(c.correct)) return false;
+  if (!isValidOptionalString(c.question, MAX_STRING)) return false;
+  if (!isValidOptionalString(c.studentAnswer, MAX_STRING)) return false;
+  if (!isValidOptionalString(c.correctAnswer, MAX_STRING)) return false;
   return true;
 }
 
@@ -63,6 +98,17 @@ function validateLogEntry(entry) {
   if (typeof entry.hintsUsed !== "number") return false;
   if (typeof entry.skipped !== "boolean") return false;
   if (!isValidTimestamp(entry.solvedAt)) return false;
+  if (!isValidOptionalString(entry.skipReason, MAX_ENUM_LIKE)) return false;
+  if (!isValidOptionalString(entry.clueType, MAX_ENUM_LIKE)) return false;
+  if (!isValidOptionalString(entry.concreteness, MAX_ENUM_LIKE)) return false;
+  if (!isValidOptionalString(entry.revealedMeaning, MAX_FREE_TEXT)) return false;
+  if (!isValidOptionalString(entry.priorKnowledge, MAX_ENUM_LIKE)) return false;
+  if (!isValidOptionalString(entry.gotItVia, MAX_ENUM_LIKE)) return false;
+  if (!isValidOptionalString(entry.clueIdentified, MAX_CLUE_PHRASE)) return false;
+  if (!isValidOptionalBoolean(entry.transferPassed)) return false;
+  if (!isValidOptionalNumber(entry.timeToAnswerSec)) return false;
+  if (!isValidOptionalString(entry.passageTitle, 200)) return false;
+  if (!isValidOptionalString(entry.funFact, MAX_FREE_TEXT)) return false;
   return true;
 }
 
@@ -128,10 +174,17 @@ async function handleSave(req, res, claims) {
   }));
   const { error: wordsError } = await supabase.from("session_words").insert(wordRows);
   if (wordsError) {
-    // The session row exists but its words didn't save; still tell the
-    // client this failed rather than reporting false success, a partial
-    // record without any word log is worse than none for the teacher's
-    // File Box, and worth surfacing rather than hiding.
+    // The insert isn't wrapped in a real transaction (two separate calls),
+    // so a failure here would otherwise leave an orphaned "sessions" row
+    // with no words attached. Best-effort compensating delete so a
+    // client-side retry doesn't just pile up more orphans — if the delete
+    // itself fails there's nothing more to do client-side, so it's
+    // deliberately fire-and-forget beyond logging, and the original error
+    // is what's reported either way.
+    const { error: cleanupError } = await supabase.from("sessions").delete().eq("id", session.id);
+    if (cleanupError) {
+      console.error("Failed to clean up orphaned session row", session.id, cleanupError);
+    }
     return res.status(502).json({ error: "Session saved but its word log failed, please tell your teacher" });
   }
 

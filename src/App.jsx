@@ -101,10 +101,14 @@ function OuterFrame({ tone = "gold" }) {
 
 const AMBIENT_ICONS_GOLD = ["🧭", "🗺️", "⛰️", "🌴", "⛵"];
 const AMBIENT_ICONS_TEAL = ["📊", "📋", "🔍", "📖", "✨"];
+// top/left keep every spot within a 8-70% vertical band so it can't crowd
+// a screen's header or footer content on a short landscape tablet (the
+// app's actual target device); size uses clamp() against vh so the icon
+// shrinks with viewport height instead of just overflowing on one.
 const AMBIENT_ICON_SPOTS = [
-  { top: "4%", left: "3%", size: 160, cls: "float-slow" },
-  { top: "62%", left: "88%", size: 190, cls: "float-med" },
-  { top: "80%", left: "8%", size: 130, cls: "float-slow" },
+  { top: "6%", left: "3%", size: "clamp(70px, 18vh, 160px)", cls: "float-slow" },
+  { top: "52%", left: "88%", size: "clamp(80px, 21vh, 190px)", cls: "float-med" },
+  { top: "68%", left: "8%", size: "clamp(65px, 15vh, 130px)", cls: "float-slow" },
 ];
 // A handful of large, very faint background icons that vary by palette,
 // reinforcing which "mode" (student/gold vs teacher/teal) a screen is in.
@@ -1051,18 +1055,28 @@ function optionInSentence(option, sentence) {
   return sentenceWords.includes(cleanOption);
 }
 
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // Loose check for whether a free-typed "text" answer uses the target word in
 // some recognizable form. Deliberately permissive (a stem match, not a full
 // inflection list) — this only exists to catch the word being fully absent,
-// so it should never false-flag a real inflection as "missing."
+// so it should never false-flag a real inflection as "missing." Word-boundary
+// anchored so a short stem can't match inside an unrelated longer word (e.g.
+// target "damp"'s old 3-char stem "dam" used to match inside "Adam" — \b
+// only allows a match that starts a word, like "dampened"). Short words
+// (<=5 letters) use the whole word as the stem rather than truncating it
+// further, since there's too little left to anchor on otherwise.
 function textLikelyContainsWord(text, targetWord) {
   if (!text || !targetWord) return false;
   const t = String(text).toLowerCase();
   const w = String(targetWord).toLowerCase().trim();
   if (!w) return false;
-  if (t.includes(w)) return true;
-  const stemLen = w.length > 4 ? w.length - 2 : Math.max(3, w.length - 1);
-  return t.includes(w.slice(0, stemLen));
+  const stemLen = w.length <= 5 ? w.length : w.length - 2;
+  const stem = w.slice(0, stemLen);
+  if (!stem) return false;
+  return new RegExp(`\\b${escapeRegex(stem)}`).test(t);
 }
 
 function validateCoachResponse(parsed, targetWordText) {
@@ -1072,6 +1086,7 @@ function validateCoachResponse(parsed, targetWordText) {
   if (typeof parsed.stage !== "number" || parsed.stage < 1 || parsed.stage > 5) return false;
   if (COACH_TYPES_NEEDING_OPTIONS.has(parsed.input_type)) {
     if (!Array.isArray(parsed.options) || parsed.options.length < 2) return false;
+    if (parsed.input_type === "true_false" && parsed.options.length !== 2) return false;
     if (typeof parsed.correct_answer !== "string" || !parsed.options.includes(parsed.correct_answer)) return false;
   }
   if (COACH_TYPES_NEEDING_TILES.has(parsed.input_type) && (!Array.isArray(parsed.word_tiles) || parsed.word_tiles.length === 0)) {
@@ -1116,7 +1131,7 @@ async function callClaudeWithRetry(systemPrompt, messages, attempts = MAX_RETRY_
 
 
 /* ---------------- UI atoms ---------------- */
-const BigButton = ({ children, onClick, disabled, variant = "solid", className = "", silent = false }) => {
+const BigButton = React.forwardRef(({ children, onClick, disabled, variant = "solid", className = "", silent = false }, ref) => {
   const base = "font-display font-800 text-sm px-6 py-3 rounded-full transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed active:translate-y-1 active:scale-95";
   const variantStyles = {
     solid: { background: "linear-gradient(180deg,#fbbf24,#d97706)", color: "white", boxShadow: "0 5px 0 0 #92400e" },
@@ -1125,6 +1140,7 @@ const BigButton = ({ children, onClick, disabled, variant = "solid", className =
   };
   return (
     <button
+      ref={ref}
       onClick={(e) => { if (!silent) SFX.click(); if (onClick) onClick(e); }}
       disabled={disabled}
       className={`${base} ${className}`}
@@ -1136,7 +1152,7 @@ const BigButton = ({ children, onClick, disabled, variant = "solid", className =
       {children}
     </button>
   );
-};
+});
 
 const AvatarBadge = ({ config, size = "w-14 h-14", pixelSize = 56 }) => (
   <div className={size}>
@@ -1335,6 +1351,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
 
   function saveMakerLevel() {
     if (!makerResult || !makerTitle.trim()) return;
+    if (makerResult.words.some((w) => !w.foundInText)) return;
     SFX.tap();
     const id = "custom-" + makerTitle.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30) + "-" + Date.now().toString(36).slice(-4);
     const newPassage = {
@@ -1642,10 +1659,15 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                   🔄 Regenerate
                 </BigButton>
               )}
-              <BigButton onClick={saveMakerLevel} disabled={!makerResult || !makerTitle.trim() || regeneratingIndex !== null}>
+              <BigButton onClick={saveMakerLevel} disabled={!makerResult || !makerTitle.trim() || regeneratingIndex !== null || makerResult.words.some((w) => !w.foundInText)}>
                 💾 Save map
               </BigButton>
             </div>
+            {makerResult && makerResult.words.some((w) => !w.foundInText) && (
+              <p className="font-body text-xs text-rose-600 text-center mt-2" aria-live="polite">
+                ⚠️ Reroll the word{makerResult.words.filter((w) => !w.foundInText).length === 1 ? "" : "s"} marked in red before saving — a word that isn't in your passage text can never be found and tapped during play.
+              </p>
+            )}
           </div>
         )}
         <Footer />
@@ -2148,7 +2170,7 @@ function cloudShade(t) {
   return CLOUD_SHADES[Math.max(0, Math.min(CLOUD_SHADES.length - 1, idx))];
 }
 
-function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, onSwitchStudent, avatarConfig, totalLogCount, streakMsg, studentId, log, sessionStartedAt, revealedCount, onRevealNext }) {
+function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, onSwitchStudent, avatarConfig, totalLogCount, streakMsg, studentId, log, sessionStartedAt, revealedCount, onRevealNext, bilingual }) {
   // Fires a CloudPuff over whichever sentence was just revealed, briefly,
   // then clears itself. Tracked here (rather than in the button, which
   // unmounts the instant revealedCount changes) so the animation attaches
@@ -2318,7 +2340,7 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, onSwit
         </div>
       )}
 
-      <div className="bg-white p-6" style={{ ...CARD_GOLD, borderColor: theme.border }}>
+      <div className="bg-white p-6" style={CARD_GOLD}>
         <h1 className="font-display text-2xl font-800 mb-4 flex items-center gap-2" style={{ color: theme.text }}>
           <span className="text-3xl">{passage.emoji}</span> {passage.title}
         </h1>
@@ -2326,6 +2348,11 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, onSwit
       </div>
       <p className="relative z-50 font-hand text-lg text-stone-600 mt-4 text-center bg-white/90 rounded-xl py-1.5">
         {revealedCount < sentences.length ? "📖 Read on, then tap a marked spot you don't know!" : "👆 Tap a marked spot you don't know!"}
+        {bilingual && (
+          <span className="block font-body text-stone-500" style={{ fontSize: "0.8em" }}>
+            {revealedCount < sentences.length ? "Terus baca, kemudian ketik bahagian bertanda yang anda tak tahu!" : "Ketik bahagian bertanda yang anda tak tahu!"}
+          </span>
+        )}
       </p>
 
       {solvedWords.length === passage.words.length && (
@@ -2522,9 +2549,26 @@ function CloseButton({ onClick }) {
 function CloseConfirmModal({ onCancel, onConfirm, screen, studentId }) {
   const inActiveSession = screen === "passage" || screen === "coach" || screen === "comprehension" || screen === "teacher";
   const atRecap = screen === "recap";
+  const cancelRef = useRef(null);
+  const confirmRef = useRef(null);
 
   useEffect(() => {
-    const onKeyDown = (e) => { if (e.key === "Escape") onCancel(); };
+    // Move focus into the dialog on open (the less-destructive "Cancel"
+    // option, so an accidental Enter/Space doesn't close the app), and
+    // trap Tab/Shift+Tab between the two buttons so a keyboard user can't
+    // tab into the page content hidden behind the overlay.
+    cancelRef.current?.focus();
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") { onCancel(); return; }
+      if (e.key !== "Tab") return;
+      if (e.shiftKey && document.activeElement === cancelRef.current) {
+        e.preventDefault();
+        confirmRef.current?.focus();
+      } else if (!e.shiftKey && document.activeElement === confirmRef.current) {
+        e.preventDefault();
+        cancelRef.current?.focus();
+      }
+    };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onCancel]);
@@ -2549,10 +2593,10 @@ function CloseConfirmModal({ onCancel, onConfirm, screen, studentId }) {
               : "Any progress in this session won't be saved once you close."}
         </p>
         <div className="flex items-center justify-center gap-3">
-          <BigButton variant="ghost" onClick={onCancel}>
+          <BigButton ref={cancelRef} variant="ghost" onClick={onCancel}>
             Cancel
           </BigButton>
-          <BigButton variant="outline" onClick={onConfirm}>
+          <BigButton ref={confirmRef} variant="outline" onClick={onConfirm}>
             Yes, close
           </BigButton>
         </div>
@@ -2843,8 +2887,7 @@ function groupMessagesByExchange(display) {
   return groups;
 }
 
-function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack, soundOn, onToggleSound, wordIndex, isTransferWord }) {
-  const mapTheme = getMapTheme(passage.title);
+function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack, soundOn, onToggleSound, wordIndex, isTransferWord, bilingual }) {
   const stage1Type = STAGE1_CYCLE[wordIndex % STAGE1_CYCLE.length];
   const stage2Type = STAGE2_CYCLE[wordIndex % STAGE2_CYCLE.length];
   const stage3Type = STAGE3_CYCLE[(wordIndex + 1) % STAGE3_CYCLE.length];
@@ -2965,7 +3008,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
   // React state timing. The manual Skip button (no argument) doesn't
   // have this problem, since `current` is already up to date whenever a
   // student can see and click it.
-  function skipWord(stageOverride) {
+  function skipWord(stageOverride, reason = "manual") {
     SFX.click();
     const revealText = `"${targetWord.word}" — ask your teacher to explain this one together!`;
     appendCoachMessage({ from: "coach", text: revealText, revealed: true });
@@ -2982,6 +3025,11 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
         funFact: null,
         revealedMeaning: revealText,
         skipped: true,
+        // "manual" = student tapped Skip immediately; "stuck_limit" = they
+        // kept trying for STUCK_WORD_LIMIT exchanges and never landed it —
+        // distinct diagnostic signals for the teacher report, not the same
+        // as giving up right away.
+        skipReason: reason,
         solvedAt: Date.now(),
         passageTitle: passage.title,
         priorKnowledge,
@@ -3059,10 +3107,14 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
     }
   }
 
-  async function submitAnswer(answerText) {
+  async function submitAnswer(answerText, opts = {}) {
     if (!current) return;
     SFX.click();
-    setDisplay((d) => [...d, { from: "student", text: answerText }]);
+    // A Retry after a failed call re-sends the same text that's already
+    // the last bubble in `display` (see the error banner's Retry button
+    // below) — don't append it again, or the student's answer shows up
+    // twice in the transcript.
+    if (!opts.isRetry) setDisplay((d) => [...d, { from: "student", text: answerText }]);
     setLoading(true);
     setError(null);
     const correctAnswer = getCorrectAnswerForCurrent();
@@ -3108,7 +3160,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
           // rather than let a genuinely stuck student keep spending AI
           // calls on a word that isn't landing. Pass parsed.stage
           // explicitly, see the stageOverride comment on skipWord().
-          skipWord(parsed.stage || 1);
+          skipWord(parsed.stage || 1, "stuck_limit");
           return;
         }
         if (parsed.hint_given) { SFX.hint(); } else { SFX.correct(); }
@@ -3233,6 +3285,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
       style={{ border: "3px solid #0d9488", boxShadow: "0 3px 0 0 #0f766e" }}
     >
       {children}
+      {bilingual && ms && <span className="block font-body font-400 text-stone-500" style={{ fontSize: "0.75em" }}>{ms}</span>}
     </button>
   );
 
@@ -3240,11 +3293,11 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
     <div className="flex flex-col overflow-hidden" style={{ height: "100dvh" }}>
       <div className="max-w-4xl mx-auto w-full px-5 pt-6 pb-3 flex-1 flex flex-col min-h-0 step-in">
         {/* Header card */}
-        <div className="relative bg-white p-3 pl-14 mb-3 shrink-0" style={{ ...CARD_GOLD, borderColor: mapTheme.border }}>
+        <div className="relative bg-white p-3 pl-14 mb-3 shrink-0" style={CARD_GOLD}>
           {wordDone && <Sparkle count={10} />}
           <div
             className="absolute -top-3 -left-3 z-20 bg-white rounded-2xl p-1"
-            style={{ border: `3px solid ${mapTheme.border}`, boxShadow: `0 3px 0 0 ${mapTheme.text}` }}
+            style={{ border: "3px solid #f59e0b", boxShadow: "0 3px 0 0 #c2410c" }}
           >
             <AvatarDisplay config={avatarConfig} size={44} />
           </div>
@@ -3266,7 +3319,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
               </button>
               <button
                 onClick={() => { SFX.tap(); setShowSettings((s) => !s); }}
-                className="w-10 h-10 rounded-full bg-white flex items-center justify-center text-lg"
+                className="w-11 h-11 rounded-full bg-white flex items-center justify-center text-lg"
                 style={{ border: "2px solid #e7e5e4", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
                 title="Settings"
                 aria-label="Settings"
@@ -3311,6 +3364,16 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
           )}
         </div>
 
+        {/* Screen-reader-only announcement of the coach's message. The
+            visible bubble below reveals it letter-by-letter for sighted
+            students (typewriter effect), but m.text already holds the full
+            final string from the moment it's appended, so this region's
+            content only changes once per new message, not once per
+            character — exactly one polite announcement per turn. */}
+        <div className="sr-only" aria-live="polite" role="status">
+          {[...display].reverse().find((m) => m.from === "coach")?.text || ""}
+        </div>
+
         {/* Single unified box */}
         <div
           ref={scrollRef}
@@ -3322,11 +3385,12 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
               <p className="text-5xl mb-3">🤔</p>
               <p className="font-hand text-2xl text-stone-500 mb-6">
                 Have you seen the word "{targetWord.word}" before?
+                {bilingual && <span className="block font-body text-stone-400" style={{ fontSize: "0.7em" }}>Pernahkah anda lihat perkataan ini sebelum ini?</span>}
               </p>
               <div className="flex flex-col gap-3 max-w-xs mx-auto">
-                <ReflectionButton onClick={() => handlePriorAnswer("no")}>🆕 No, it's new to me</ReflectionButton>
-                <ReflectionButton onClick={() => handlePriorAnswer("not_sure")}>🤷 Not sure</ReflectionButton>
-                <ReflectionButton onClick={() => handlePriorAnswer("yes")}>✅ Yes, I know it</ReflectionButton>
+                <ReflectionButton onClick={() => handlePriorAnswer("no")} ms="Tidak, ini baharu bagi saya">🆕 No, it's new to me</ReflectionButton>
+                <ReflectionButton onClick={() => handlePriorAnswer("not_sure")} ms="Tidak pasti">🤷 Not sure</ReflectionButton>
+                <ReflectionButton onClick={() => handlePriorAnswer("yes")} ms="Ya, saya tahu">✅ Yes, I know it</ReflectionButton>
               </div>
             </div>
           )}
@@ -3390,7 +3454,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                       {m.from === "coach" && (
                         <button
                           onClick={() => speak(m.text)}
-                          className="shrink-0 mt-0.5 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white border-[3px] border-stone-300 flex items-center justify-center hover:border-teal-400 hover:bg-teal-50"
+                          className="shrink-0 mt-0.5 w-11 h-11 rounded-full bg-white border-[3px] border-stone-300 flex items-center justify-center hover:border-teal-400 hover:bg-teal-50"
                           title="Read aloud"
                           aria-label="Read this message aloud"
                         >
@@ -3419,7 +3483,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
               {isLatestSlide && error && (
                 <div className="border-2 border-rose-300 bg-rose-50 text-rose-600 font-body text-sm px-4 py-3 rounded-2xl flex items-center justify-between gap-2 step-in" aria-live="polite">
                   {error}
-                  <BigButton variant="ghost" onClick={() => (history.length <= 1 ? startWord() : submitAnswer(display[display.length - 1]?.text || ""))}>
+                  <BigButton variant="ghost" onClick={() => (history.length <= 1 ? startWord() : submitAnswer(display[display.length - 1]?.text || "", { isRetry: true }))}>
                     Retry
                   </BigButton>
                 </div>
@@ -3588,9 +3652,9 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                     How did you get it?
                   </p>
                   <div className="flex flex-col gap-3 max-w-xs mx-auto">
-                    <ReflectionButton onClick={() => handleGotItVia("knew")}>💡 I already knew it</ReflectionButton>
-                    <ReflectionButton onClick={() => handleGotItVia("clues")}>🔍 I used the clues</ReflectionButton>
-                    <ReflectionButton onClick={() => handleGotItVia("guessed")}>🎲 I guessed</ReflectionButton>
+                    <ReflectionButton onClick={() => handleGotItVia("knew")} ms="Saya sudah tahu">💡 I already knew it</ReflectionButton>
+                    <ReflectionButton onClick={() => handleGotItVia("clues")} ms="Saya guna petunjuk">🔍 I used the clues</ReflectionButton>
+                    <ReflectionButton onClick={() => handleGotItVia("guessed")} ms="Saya meneka">🎲 I guessed</ReflectionButton>
                   </div>
                 </div>
               )}
@@ -3875,7 +3939,7 @@ function downloadReport(studentId, log, summary) {
 
 
 /* ---------------- Comprehension Screen ---------------- */
-function ComprehensionScreen({ passage, avatarConfig, onDone }) {
+function ComprehensionScreen({ passage, avatarConfig, onDone, bilingual }) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [answer, setAnswer] = useState(null);
@@ -3885,13 +3949,13 @@ function ComprehensionScreen({ passage, avatarConfig, onDone }) {
     (async () => {
       setLoading(true);
       try {
-        const raw = await callClaude(COMPREHENSION_SYSTEM_PROMPT, [{ role: "user", content: `Passage: "${passage.text}"` }]);
-        const parsed = safeParseJSON(raw);
-        if (parsed && parsed.question && Array.isArray(parsed.options)) {
-          setData(parsed);
-        } else {
-          onDone({ ran: false });
-        }
+        const parsed = await callClaudeWithRetry(
+          COMPREHENSION_SYSTEM_PROMPT,
+          [{ role: "user", content: `Passage: "${passage.text}"` }],
+          MAX_RETRY_ATTEMPTS,
+          (p) => p && p.question && Array.isArray(p.options)
+        );
+        setData(parsed);
       } catch (e) {
         onDone({ ran: false });
       } finally {
@@ -3926,8 +3990,14 @@ function ComprehensionScreen({ passage, avatarConfig, onDone }) {
           >
             <AvatarDisplay config={avatarConfig} size={44} />
           </div>
-          <h1 className="font-display text-2xl sm:text-3xl font-800 text-stone-700 leading-tight">📖 One Last Check</h1>
-          <p className="font-hand text-base sm:text-lg text-orange-700 leading-tight">Did you follow the whole story, {passage.title}?</p>
+          <h1 className="font-display text-2xl sm:text-3xl font-800 text-stone-700 leading-tight">
+            📖 One Last Check
+            {bilingual && <span className="block font-body font-400 text-base text-stone-500">Semakan Terakhir</span>}
+          </h1>
+          <p className="font-hand text-base sm:text-lg text-orange-700 leading-tight">
+            Did you follow the whole story, {passage.title}?
+            {bilingual && <span className="block font-body text-stone-500" style={{ fontSize: "0.75em" }}>Adakah anda faham keseluruhan cerita ini?</span>}
+          </p>
         </div>
 
         {/* Single unified box, matching CoachScreen */}
@@ -4545,8 +4615,12 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
     setLoading(true);
     setError(null);
     setSummary(null);
-    const logForModel = log.map(({ word, clueType, concreteness, finalStage, hintsUsed, skipped, priorKnowledge, gotItVia, clueIdentified, transferPassed, timeToAnswerSec }) => ({
+    const logForModel = log.map(({ word, clueType, concreteness, finalStage, hintsUsed, skipped, skipReason, priorKnowledge, gotItVia, clueIdentified, transferPassed, timeToAnswerSec }) => ({
       word, clueType, concreteness, finalStage, hintsUsed, skipped: !!skipped,
+      // Only meaningful when skipped is true: "manual" = gave up right
+      // away, "stuck_limit" = kept trying and genuinely couldn't land it —
+      // a real difference for a diagnostic report to reason about.
+      skipReason: skipped ? skipReason || "manual" : null,
       priorKnowledge: priorKnowledge || null,
       gotItVia: gotItVia || null,
       clueIdentified: clueIdentified || null,
@@ -4693,7 +4767,7 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
               </div>
               {glance.skipped.length > 0 && (
                 <p className="mt-3 text-xs font-body text-rose-700 bg-rose-100 rounded-xl px-3 py-2">
-                  ⚠️ Needed direct answers: {glance.skipped.map((e) => e.word).join(", ")}
+                  ⚠️ Needed direct answers: {glance.skipped.map((e) => `${e.word}${e.skipReason === "stuck_limit" ? " (kept trying)" : ""}`).join(", ")}
                 </p>
               )}
               {glance.breakdown.length > 0 && (
@@ -5120,9 +5194,20 @@ export default function App() {
   const [revealedCount, setRevealedCount] = useState(1);
   const [authInfo, setAuthInfo] = useState(() => loadCachedAuth());
   const [studentAuth, setStudentAuth] = useState(() => loadCachedStudentAuth());
+  // Tracks whether we've ever been authenticated this page-load (survives
+  // authInfo going back to null), so a mid-session token expiry — e.g.
+  // while a word is mid-conversation in CoachScreen — can be told apart
+  // from the very first, pre-auth load. On expiry the first case would
+  // otherwise unmount the entire main tree (CoachScreen included) to swap
+  // in AccessGateScreen, destroying that word's in-progress history/hints
+  // for no reason beyond needing the code re-entered. See the render logic
+  // below: once this is true, a null authInfo shows a re-auth overlay on
+  // top of the still-mounted main tree instead of replacing it.
+  const hasAuthenticatedOnceRef = useRef(!!authInfo);
 
   useEffect(() => {
     currentAuthToken = authInfo?.token || null;
+    if (authInfo) hasAuthenticatedOnceRef.current = true;
   }, [authInfo]);
 
   useEffect(() => {
@@ -5224,7 +5309,7 @@ export default function App() {
     setScreen("setup");
   }
 
-  if (!authInfo) {
+  if (!authInfo && !hasAuthenticatedOnceRef.current) {
     return (
       <div className="min-h-screen text-stone-700" style={{ fontFamily: "ui-sans-serif, system-ui", background: "#FAF6EF" }}>
         <FontImport />
@@ -5274,6 +5359,26 @@ export default function App() {
             setAppClosed(true);
           }}
         />
+      )}
+      {!authInfo && hasAuthenticatedOnceRef.current && (
+        // The class's shared access-code session expired mid-use. Shown as
+        // an overlay on top of the still-mounted main tree — deliberately
+        // NOT the early-return swap used before first auth — so whatever
+        // screen/word the student was on (its component state, e.g. a
+        // CoachScreen mid-conversation with a word) survives underneath
+        // and picks back up exactly where it was once the teacher re-enters
+        // the code, instead of being unmounted and restarted from scratch.
+        <div className="fixed inset-0 flex flex-col items-center justify-center p-6 overflow-y-auto" style={{ zIndex: 10000, background: "#FAF6EF" }}>
+          <p className="font-body text-sm text-stone-600 bg-white rounded-full px-4 py-2 mb-2 text-center" style={{ border: "3px solid #0d9488" }} aria-live="polite">
+            ⏳ Your class's session timed out. Nothing was lost, just re-enter the code to keep going.
+          </p>
+          <AccessGateScreen
+            onUnlocked={(token, expiresAt) => {
+              saveCachedAuth(token, expiresAt);
+              setAuthInfo({ token, expiresAt });
+            }}
+          />
+        </div>
       )}
       {screen !== "coach" && (
         <SoundToggle soundOn={soundOn} onToggle={() => { const next = !soundOn; setSoundOn(next); setSoundEnabledGlobal(next); }} />
@@ -5327,6 +5432,7 @@ export default function App() {
             sessionStartedAt={sessionStartedAt}
             revealedCount={revealedCount}
             onRevealNext={() => setRevealedCount((n) => n + 1)}
+            bilingual={bilingual}
           />
         )}
         {screen === "coach" && activeWord && (
@@ -5340,12 +5446,14 @@ export default function App() {
             onToggleSound={(next) => { setSoundOn(next); setSoundEnabledGlobal(next); }}
             wordIndex={wordIndex}
             isTransferWord={activeWord && transferWordId === activeWord.word}
+            bilingual={bilingual}
           />
         )}
         {screen === "comprehension" && (
           <ComprehensionScreen
             passage={passage}
             avatarConfig={avatarConfig}
+            bilingual={bilingual}
             onDone={(result) => {
               setComprehensionResult(result);
               // Best-effort, same philosophy as the quota cache: a failed

@@ -4,9 +4,11 @@
 // as _claudeHandler.js.
 //
 // This is a lightweight access gate, not a full account system: codes are
-// shared secrets distributed to teachers/schools, not per-user logins.
-// The goal is keeping random internet traffic off the Gemini proxy, not
-// protecting stored student data (the app stores nothing server-side).
+// shared secrets distributed to teachers/schools, not per-user logins. The
+// goal is keeping random internet traffic off the Groq proxy and daily
+// quota, not protecting student data — student accounts and session
+// results are a separate, per-student auth layer (see _studentAuth.js /
+// _studentAuthHandler.js / _sessionHandler.js) with its own access checks.
 
 import { signToken } from "./_auth.js";
 import { isOriginAllowed, getClientIp, pruneIfLarge, isPlainObjectWithOnlyKeys, DAILY_QUOTA_PER_CODE } from "./_shared.js";

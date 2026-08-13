@@ -29,6 +29,63 @@ const MAX_MESSAGES = 40;
 const MAX_MESSAGE_CHARS = 8000;
 const MAX_SYSTEM_CHARS = 12000;
 
+// validateBody only checked the "system" field's type/length, not its
+// content, which let any valid token holder set "system" to literally
+// anything and use this endpoint as a general-purpose LLM proxy against
+// the project's Groq quota (or try to steer the AI coach persona
+// off-topic). App.jsx only ever builds its system prompts from a fixed
+// set of prompt-builders (see src/App.jsx: buildCoachSystemPrompt,
+// TRANSFER_TEST_SYSTEM_PROMPT, COMPREHENSION_SYSTEM_PROMPT,
+// SINGLE_WORD_REGEN_PROMPT, LEVEL_MAKER_SYSTEM_PROMPT,
+// DIAGNOSTIC_SYSTEM_PROMPT), so pin against verbatim, distinctive
+// substrings from each of those real prompts' fixed opening text instead
+// of modifying src/App.jsx to add a wire-format marker. Most of these
+// prompts are plain template literals starting with fixed text, so a
+// startsWith() check works directly. buildCoachSystemPrompt is the one
+// exception: it opens with a per-companion persona sentence (see
+// COMPANION_PERSONAS) before the shared fixed sentence below, so for that
+// one we require the fixed marker to appear within the first stretch of
+// the string (comfortably longer than the longest persona sentence)
+// rather than at position 0.
+//
+// LIMITATION (documented, not fixed here): this only pins the *opening*
+// of the system prompt. A caller who already knows one of these fixed
+// prefixes could still prepend it verbatim and then append arbitrary
+// malicious continuation text, since nothing here checks the rest of the
+// string. That's an intentional, accepted gap for now — closing it fully
+// would need a wire-format change (e.g. the client sending a prompt *id*
+// instead of the full prompt text, with the server owning the actual
+// prompt strings), which is out of scope for this pass. This still closes
+// off the main abuse case (using the endpoint as an open LLM proxy for
+// unrelated prompts).
+const FIXED_SYSTEM_PREFIXES = [
+  // DIAGNOSTIC_SYSTEM_PROMPT
+  "You are the G.I.S.T. diagnostic engine. G.I.S.T. is purely an assessment tool,",
+  // TRANSFER_TEST_SYSTEM_PROMPT
+  "A Malaysian primary school ESL student just worked out a vocabulary word inside one specific passage.",
+  // COMPREHENSION_SYSTEM_PROMPT
+  "A Malaysian primary school ESL student just finished working through 5 vocabulary words from a passage.",
+  // SINGLE_WORD_REGEN_PROMPT
+  "You help a teacher fix one word in a G.I.S.T. map. You are given a passage and a list of words already chosen as targets,",
+  // LEVEL_MAKER_SYSTEM_PROMPT(wordCount)
+  "You help a teacher turn their own reading passage into a G.I.S.T. map for Malaysian primary school (Year 4-6) ESL students.",
+];
+
+// The fixed continuation of buildCoachSystemPrompt() that follows the
+// per-companion persona sentence. Longest persona string in
+// COMPANION_PERSONAS is well under 200 chars, so a 300-char search window
+// leaves comfortable margin without being so wide it stops meaning
+// anything.
+const COACH_PROMPT_MARKER =
+  "Help a Malaysian primary school ESL student (age 9-12) work out ONE target vocabulary word from context.";
+const COACH_PROMPT_MARKER_MAX_OFFSET = 300;
+
+function isAllowedSystemPrompt(system) {
+  if (FIXED_SYSTEM_PREFIXES.some((p) => system.startsWith(p))) return true;
+  const idx = system.indexOf(COACH_PROMPT_MARKER);
+  return idx !== -1 && idx <= COACH_PROMPT_MARKER_MAX_OFFSET;
+}
+
 // Best-effort per-instance rate limit. Serverless instances are short-lived
 // and not shared, so this doesn't guarantee a global cap, but it stops a
 // single abusive client from hammering a warm instance. Vercel's Firewall
@@ -86,10 +143,23 @@ function getQuotaStatus(label) {
   return { used, limit: DAILY_QUOTA_PER_CODE, remaining: Math.max(0, DAILY_QUOTA_PER_CODE - used), exceeded: used > DAILY_QUOTA_PER_CODE };
 }
 
+// Read-only counterpart to getQuotaStatus: reports what today's usage
+// *would* be without incrementing anything, so the ceiling can be checked
+// (and an already-exhausted code correctly rejected) before we know a
+// Groq call is actually about to be attempted, without prematurely
+// charging for one.
+function getQuotaPreview(label) {
+  const day = new Date().toISOString().slice(0, 10);
+  const entry = quotaLog.get(label);
+  const used = !entry || entry.day !== day ? 0 : entry.count;
+  return { used, limit: DAILY_QUOTA_PER_CODE, remaining: Math.max(0, DAILY_QUOTA_PER_CODE - used), exceeded: used >= DAILY_QUOTA_PER_CODE };
+}
+
 function validateBody(body) {
   if (!isPlainObjectWithOnlyKeys(body, ALLOWED_BODY_KEYS)) return "Missing or unexpected fields in request body";
   if (body.model !== ALLOWED_MODEL) return "Unsupported model";
   if (typeof body.system !== "string" || body.system.length > MAX_SYSTEM_CHARS) return "Invalid system prompt";
+  if (!isAllowedSystemPrompt(body.system)) return "Invalid system prompt";
   if (!Array.isArray(body.messages) || body.messages.length === 0 || body.messages.length > MAX_MESSAGES) {
     return "Invalid messages";
   }
@@ -152,14 +222,26 @@ export default async function claudeHandler(req, res) {
     return res.status(400).json({ error: validationError });
   }
 
-  const quota = getQuotaStatus(claims.label);
-  if (quota.exceeded) {
-    return res.status(429).json({ error: "Daily quota reached for this access code, please try again tomorrow", quota });
+  // Quota is a count of *attempted* Groq calls, so it must not be charged
+  // until we actually know a call is about to be attempted with a valid
+  // key. Checking the quota ceiling itself still has to come before that,
+  // though, since checking it doesn't consume anything (getPreviewQuota
+  // vs getQuotaStatus's charge) — otherwise a request that's already over
+  // quota could sneak past by hitting the missing-key/network-error path.
+  const preview = getQuotaPreview(claims.label);
+  if (preview.exceeded) {
+    return res.status(429).json({ error: "Daily quota reached for this access code, please try again tomorrow", quota: preview });
   }
 
   if (!process.env.GROQ_API_KEY) {
-    return res.status(500).json({ error: "Server is missing GROQ_API_KEY", quota });
+    return res.status(500).json({ error: "Server is missing GROQ_API_KEY", quota: preview });
   }
+
+  // Only charge the day's quota once we're actually about to spend a Groq
+  // call, immediately before the fetch — a misconfigured key (caught
+  // above) or a network failure (caught below) must not burn quota for a
+  // call that never completed.
+  const quota = getQuotaStatus(claims.label);
 
   try {
     const response = await fetch(GROQ_URL, {

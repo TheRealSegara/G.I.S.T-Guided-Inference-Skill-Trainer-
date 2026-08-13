@@ -31,12 +31,27 @@ export function getAllowedOrigins() {
     .filter(Boolean);
 }
 
+// Prefix-matching an allowed origin with a bare .startsWith() lets
+// "https://your-app.vercel.app.evil.com" pass whenever
+// "https://your-app.vercel.app" is allowed, since the shorter string really
+// is a prefix of the longer one. Require either an exact match, or that the
+// allowed origin is followed immediately by "/" (a path on the same
+// origin/referer) — never a bareword continuation like ".evil.com" that
+// turns it into a different host entirely. Kept in sync with the
+// near-identical check in middleware.js (see that file's comment on why
+// it's a separate implementation rather than a shared import).
+function isOriginMatch(value, allowed) {
+  if (!value || !value.startsWith(allowed)) return false;
+  const nextChar = value.charAt(allowed.length);
+  return nextChar === "" || nextChar === "/";
+}
+
 export function isOriginAllowed(req) {
   const allowed = getAllowedOrigins();
   if (allowed.length === 0) return true; // not configured yet: allow (see README)
   const origin = req.headers.origin || "";
   const referer = req.headers.referer || "";
-  return allowed.some((a) => origin.startsWith(a) || referer.startsWith(a));
+  return allowed.some((a) => isOriginMatch(origin, a) || isOriginMatch(referer, a));
 }
 
 // req.headers["x-forwarded-for"] is client-suppliable and must never be

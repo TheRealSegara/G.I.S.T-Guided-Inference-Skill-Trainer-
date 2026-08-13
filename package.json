@@ -4,6 +4,9 @@
   "private": true,
   "description": "G.I.S.T. (Guided Inference Skill Trainer) — an AI-powered vocabulary and reading comprehension assessment tool for Malaysian primary school ESL students.",
   "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",

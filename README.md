@@ -142,7 +142,8 @@ Container-based hosts don't run per-file serverless functions the way Vercel doe
 │   ├── _sessionHandler.js       # Save (student) / read + cache diagnostic (teacher) logic, shared with server.js
 │   ├── teacher-roster.js        # Vercel serverless function entry point for the File Box roster
 │   ├── _teacherRosterHandler.js # Roster + per-student session list logic, shared with server.js
-│   └── _supabase.js             # Supabase client singleton, service-role key only
+│   ├── _supabase.js             # Supabase client singleton, service-role key only
+│   └── _shared.js               # Origin/IP checks, in-memory Map pruning, DAILY_QUOTA_PER_CODE
 ├── supabase/
 │   └── schema.sql                # One-time migration: run in the Supabase SQL Editor
 ├── middleware.js              # Vercel Edge Middleware: rejects bad method/origin before functions run
