@@ -894,6 +894,11 @@ async function callClaude(systemPrompt, messages) {
         : data?.error || "API request failed"
     );
     err.status = response.status;
+    // Distinguishes a short-lived 429 (our own per-IP throttle, or Groq's
+    // own per-minute rate limit — both clear within seconds) from the
+    // daily-quota-exhausted 429 (won't clear until tomorrow, no point
+    // retrying) — see the matching comments in api/_claudeHandler.js.
+    err.retryable = data?.retryable === true;
     throw err;
   }
   const data = await response.json();
@@ -988,8 +993,18 @@ async function cacheSessionDiagnostic(sessionId, diagnosticReport) {
 // Failures the server can't resolve by simply being asked again: retrying
 // just delays showing the real message (or, for 401, spams /api/claude
 // with an already-invalidated token). Only network hiccups and malformed
-// JSON responses are worth a retry.
+// JSON responses are worth a retry — 429 is a special case, see
+// RETRYABLE_WAIT_MS below: most 429s land here too (daily quota
+// exhausted, won't clear until tomorrow), but a short-lived one (our own
+// per-IP throttle, or Groq's own per-minute rate limit) is carved out via
+// the `retryable` flag rather than being lumped in with the rest.
 const NON_RETRYABLE_STATUSES = new Set([400, 401, 403, 429]);
+// A rate-limited 429 clears within its rolling window (Groq's own error
+// message for this typically cites single-digit-to-tens of seconds), not
+// instantly — the default backoff below (a few hundred ms) is tuned for
+// transient network/parse hiccups, not this, so a retryable 429
+// specifically waits this much longer before the next attempt.
+const RETRYABLE_429_WAIT_MS = 20_000;
 
 function safeParseJSON(raw) {
   let cleaned = raw.trim();
@@ -1132,6 +1147,7 @@ function validateCoachResponse(parsed, targetWordText) {
 async function callClaudeWithRetry(systemPrompt, messages, attempts = MAX_RETRY_ATTEMPTS, validate = null) {
   let lastError = null;
   for (let i = 0; i < attempts; i++) {
+    let wasRetryable429 = false;
     try {
       const raw = await callClaude(systemPrompt, messages);
       const parsed = safeParseJSON(raw);
@@ -1139,10 +1155,11 @@ async function callClaudeWithRetry(systemPrompt, messages, attempts = MAX_RETRY_
       lastError = new Error(parsed ? "Response didn't match the expected shape" : "Response wasn't valid JSON");
     } catch (e) {
       lastError = e;
-      if (NON_RETRYABLE_STATUSES.has(e.status)) break;
+      wasRetryable429 = e.status === 429 && e.retryable;
+      if (NON_RETRYABLE_STATUSES.has(e.status) && !wasRetryable429) break;
     }
     if (i < attempts - 1) {
-      await new Promise((resolve) => setTimeout(resolve, 400 * (i + 1)));
+      await new Promise((resolve) => setTimeout(resolve, wasRetryable429 ? RETRYABLE_429_WAIT_MS : 400 * (i + 1)));
     }
   }
   throw lastError || new Error("Couldn't get a response, please try again");
@@ -1314,34 +1331,28 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
     const userContent = chosenWords.length
       ? `${makerText.trim()}\n\nRequired words: use exactly these words for the target list, in this order, spelled exactly as I've written them here: ${chosenWords.join(", ")}. If fewer than ${SESSION_WORD_COUNT} are given, pick your own good words to fill the remaining slots.`
       : makerText.trim();
-    let lastError = null;
-    for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++) {
-      try {
-        const raw = await callClaude(LEVEL_MAKER_SYSTEM_PROMPT(SESSION_WORD_COUNT), [{ role: "user", content: userContent }]);
-        const parsed = safeParseJSON(raw);
-        if (parsed && Array.isArray(parsed.words) && parsed.words.length === SESSION_WORD_COUNT) {
-          const validated = parsed.words.map((w) => ({
-            ...w,
-            foundInText: makerText.toLowerCase().includes(String(w.word || "").toLowerCase()),
-          }));
-          setMakerResult({
-            emoji: parsed.emoji || "📖",
-            mission: parsed.mission || "",
-            arrival: parsed.arrival || "",
-            readabilityLevel: parsed.readabilityLevel || null,
-            readabilityNote: parsed.readabilityNote || "",
-            words: validated,
-          });
-          setMakerGenerating(false);
-          return;
-        }
-        lastError = new Error("Unexpected response format");
-      } catch (e) {
-        lastError = e;
-        if (NON_RETRYABLE_STATUSES.has(e.status)) break;
-      }
+    try {
+      const parsed = await callClaudeWithRetry(
+        LEVEL_MAKER_SYSTEM_PROMPT(SESSION_WORD_COUNT),
+        [{ role: "user", content: userContent }],
+        MAX_RETRY_ATTEMPTS,
+        (p) => p && Array.isArray(p.words) && p.words.length === SESSION_WORD_COUNT
+      );
+      const validated = parsed.words.map((w) => ({
+        ...w,
+        foundInText: makerText.toLowerCase().includes(String(w.word || "").toLowerCase()),
+      }));
+      setMakerResult({
+        emoji: parsed.emoji || "📖",
+        mission: parsed.mission || "",
+        arrival: parsed.arrival || "",
+        readabilityLevel: parsed.readabilityLevel || null,
+        readabilityNote: parsed.readabilityNote || "",
+        words: validated,
+      });
+    } catch (e) {
+      setMakerError(`Couldn't generate the map just now. ${e.message || ""} Try again.`);
     }
-    setMakerError(`Couldn't generate the map just now. ${lastError ? lastError.message : ""} Try again.`);
     setMakerGenerating(false);
   }
 
@@ -4678,32 +4689,21 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
       role: "user",
       content: `Student: ${studentId}\nLog (chronological, oldest first):\n${JSON.stringify(logForModel, null, 2)}\n\nWhole-passage comprehension check:\n${JSON.stringify(comprehensionForModel, null, 2)}${teacherNotes.trim() ? `\n\nTeacher notes about this session's context: ${teacherNotes.trim()}` : ""}`,
     };
-    let lastError = null;
-    for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++) {
-      try {
-        const raw = await callClaude(DIAGNOSTIC_SYSTEM_PROMPT, [userMsg]);
-        const parsed = safeParseJSON(raw);
-        if (parsed && parsed.corePattern) {
-          const nextSummary = {
-            summary: parsed.summary || "",
-            corePattern: parsed.corePattern,
-            howReliable: parsed.howReliable || "",
-            storyUnderstandingNote: parsed.storyUnderstandingNote || "",
-            whatToTry: parsed.whatToTry || "",
-          };
-          setSummary(nextSummary);
-          onDiagnosticGenerated?.(nextSummary);
-          SFX.reportReady();
-          setLoading(false);
-          return;
-        }
-        lastError = new Error("Response wasn't in the expected format");
-      } catch (e) {
-        lastError = e;
-        if (NON_RETRYABLE_STATUSES.has(e.status)) break;
-      }
+    try {
+      const parsed = await callClaudeWithRetry(DIAGNOSTIC_SYSTEM_PROMPT, [userMsg], MAX_RETRY_ATTEMPTS, (p) => p && p.corePattern);
+      const nextSummary = {
+        summary: parsed.summary || "",
+        corePattern: parsed.corePattern,
+        howReliable: parsed.howReliable || "",
+        storyUnderstandingNote: parsed.storyUnderstandingNote || "",
+        whatToTry: parsed.whatToTry || "",
+      };
+      setSummary(nextSummary);
+      onDiagnosticGenerated?.(nextSummary);
+      SFX.reportReady();
+    } catch (e) {
+      setError(`Couldn't generate the summary just now. ${e.message || ""} Try again.`);
     }
-    setError(`Couldn't generate the summary just now. ${lastError ? lastError.message : ""} Try again.`);
     setLoading(false);
   }
 

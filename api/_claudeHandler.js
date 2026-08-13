@@ -204,7 +204,10 @@ export default async function claudeHandler(req, res) {
 
   const ip = getClientIp(req);
   if (isRateLimited(ip)) {
-    return res.status(429).json({ error: "Too many requests, please slow down" });
+    // Unlike the daily-quota 429 below, this clears itself within
+    // RATE_LIMIT_WINDOW_MS (60s) — worth the client auto-retrying rather
+    // than making a student/teacher notice and click Retry manually.
+    return res.status(429).json({ error: "Too many requests, please slow down", retryable: true });
   }
 
   const authHeader = req.headers["authorization"] || "";
@@ -264,7 +267,13 @@ export default async function claudeHandler(req, res) {
 
     const data = await response.json();
     if (!response.ok) {
-      return res.status(response.status).json({ error: data?.error?.message || "Upstream error", quota });
+      // Groq's own 429 (its free-tier per-minute request/token ceiling,
+      // distinct from our own daily-quota 429 above) is short-lived —
+      // its own error message typically includes a "try again in Ns"
+      // window of single-digit-to-tens of seconds — so it's worth the
+      // client auto-retrying rather than surfacing a dead end.
+      const retryable = response.status === 429;
+      return res.status(response.status).json({ error: data?.error?.message || "Upstream error", quota, ...(retryable ? { retryable: true } : {}) });
     }
     return res.status(200).json({ ...toAnthropicShape(data), quota });
   } catch (err) {
