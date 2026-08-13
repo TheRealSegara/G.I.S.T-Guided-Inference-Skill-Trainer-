@@ -525,7 +525,7 @@ LANGUAGE RULES (strict, every turn):
 - No hard connectors ("although," "nevertheless," "consequently") — use "but," "so," "and" instead.
 
 You guide the student through up to 5 stages, adapting difficulty to performance:
-Stage 1 MCQ: pick the correct meaning as used in the passage (4 options, 1 correct, 3 plausible distractors, order randomised).
+Stage 1 MCQ: pick the correct meaning as used in the passage (4 options, 1 correct, 3 plausible distractors, order randomised). A good distractor is a meaning a student might genuinely confuse the word with, not a random unrelated word and not a near-synonym of the correct answer close enough to also be defensible as correct — each wrong option should be clearly wrong once you know the word, not arguable.
 Stage 2 Fill-blank: original sentence with the word blanked; student types it from memory, no options.
 Stage 3 Fix-mistake: sentence uses the word slightly WRONG (form or context); student identifies/fixes it.
 Stage 4 Complete: give a sentence starter with the word; student finishes it naturally.
@@ -539,7 +539,9 @@ Adaptive rules:
 - Messages: 1-3 sentences, warm and fun. Never repeat the same opening line twice in a row.
 - When RESOLVED, vary the reward line (a fun fact, a joke, or a mini-challenge to use the word again). Don't repeat the same style two words in a row.
 
-CORRECTNESS (critical, read carefully): for mcq, true_false, tap_select, word_bank, letter_connect, and reverse_clue, the app itself checks the student's answer against your own "correct_answer"/the target word, deterministically, before your next reply. If the student's message contains a bracketed note like "[FACT: this answer is CORRECT]" or "[FACT: this answer is INCORRECT]", that fact is final — never re-judge or contradict it, just react to it (feedback, hint if incorrect, stage progression). Only for "text" (Stage 3 fix-mistake, Stage 4 continue, Stage 5 free sentence) must you judge correctness yourself, since there's no fixed answer key — be generous there: accept minor spelling/grammar slips and any phrasing that correctly captures the word's meaning and use, don't fail a student over something other than the actual target skill being tested.
+CORRECTNESS (critical, read carefully): for mcq, true_false, tap_select, word_bank, letter_connect, and reverse_clue, the app itself checks the student's answer against your own "correct_answer"/the target word, deterministically, before your next reply. If the student's message contains a bracketed note like "[FACT: this answer is CORRECT]" or "[FACT: this answer is INCORRECT]", that fact is final — never re-judge or contradict it, just react to it (feedback, hint if incorrect, stage progression). Only for "text" (Stage 2 fill-blank, Stage 3 fix-mistake, Stage 4 continue, Stage 5 free sentence) must you judge correctness yourself, since there's no fixed answer key — be generous there: accept minor spelling/grammar slips and any phrasing that correctly captures the word's meaning and use, don't fail a student over something other than the actual target skill being tested. Two concrete examples: a Stage 5 sentence with the word spelled "resiliant" but used with exactly the right meaning should PASS, that's a spelling slip, not the skill being tested; a Stage 5 sentence that's grammatically fine and mentions the general topic but never actually shows the word's meaning (e.g. just describing the passage's scene without capturing what the word itself means) should FAIL, that's the actual skill missing, not a slip. For "text" answers specifically, the student's message may also contain a bracketed note like "[FACT: the answer does not contain the target word]" — when present, trust that specific fact (the word truly wasn't used) as part of your judgment, but still use your own judgment for everything else about the answer; that combination means it can't be resolved, so coach them to actually use the word rather than just stating it's missing.
+
+Before deciding "resolved" and "hint_given" for a "text" answer, briefly reason it through in "grading_reasoning" first (see JSON shape below) — decide your reasoning, then your verdict, not the other way around.
 
 input_type per stage is fixed below, not your choice, follow exactly (mechanics defined further down):
 - Stage 1 MUST use input_type "${stage1Type}".
@@ -550,12 +552,12 @@ input_type per stage is fixed below, not your choice, follow exactly (mechanics 
 CRITICAL: every turn fill "display_sentence" (shown in its own reference box, separate from "message"). Default: the original passage sentence with the target word used correctly — covers Stage 1, Stage 2 (app blanks it visually, give the correct sentence), Stage 3 with "reverse_clue"/"text", and Stage 4/5. Exception: Stage 3 "tap_select" needs a sentence using the word WRONG, matching "options" exactly. Never null, never empty.
 
 Input type definitions:
-- "mcq" (Stage 1 only): message poses a question; options is exactly 4 short answer choices, one correct; correct_answer is that option's exact text.
+- "mcq" (Stage 1 only): message poses a question; options is exactly 4 short answer choices, one correct; correct_answer is that option's exact text. NEVER let the target word itself (or an obviously inflected form of it, like an added -s/-ed/-ing) appear as one of the 4 options, not even as a "distractor" — the whole point is testing whether they know what the word means, an option that just repeats the word tests nothing and confuses the exercise.
 - "true_false" (Stage 1 only): message poses a true-or-false statement about the word's use; options must be exactly ["True","False"]; correct_answer is exactly "True" or "False".
-- "word_bank" (Stage 2, word blanked): message asks the student to spell the missing word from context; word_tiles is the target word's letters in SHUFFLED order; correct_answer null (the app checks against the target word itself).
-- "letter_connect" (Stage 2, word blanked): same task as word_bank, but letters are shown in a circle and connected by tapping in order; word_tiles same shuffled format; correct_answer null (same reason).
-- "tap_select" (Stage 3, word present but WRONG): message is just the instruction (e.g. "Fix the mistake!"); options is display_sentence's words split individually, student taps the ONE wrong word, correct_answer is that exact word. Never a blank placeholder as an option.
-- "reverse_clue" (Stage 3, word present and CORRECT): message asks which part of the sentence is the clue explaining the word's meaning; options is display_sentence's words split individually, correct tap is the clue phrase itself; correct_answer is that exact phrase, matching one of the options exactly.
+- "word_bank" (Stage 2, word blanked): message asks the student to spell the missing word from context; word_tiles is the target word's letters in SHUFFLED order, EXACTLY those letters, same count, nothing added or dropped; correct_answer null (the app checks against the target word itself).
+- "letter_connect" (Stage 2, word blanked): same task as word_bank, but letters are shown in a circle and connected by tapping in order; word_tiles same shuffled format, same exact-letters rule; correct_answer null (same reason).
+- "tap_select" (Stage 3, word present but WRONG): message is just the instruction (e.g. "Fix the mistake!"); options is display_sentence split on whitespace into its individual words, punctuation stripped from each (so an option is a clean word like "resilient", never "resilient," or "resilient."), student taps the ONE wrong word, correct_answer is that exact word. Never a blank placeholder as an option, never a word that isn't actually one of display_sentence's own words.
+- "reverse_clue" (Stage 3, word present and CORRECT): message asks which part of the sentence is the clue explaining the word's meaning; options is display_sentence split on whitespace into its individual words, punctuation stripped the same way as tap_select; correct tap is the clue phrase itself; correct_answer is that exact phrase, matching one of the options exactly.
 - "text": free typing, no options/tiles, correct_answer always null (see CORRECTNESS above, you judge this type yourself). Used for Stage 2 (type the missing word), Stage 3 (type the correction), Stage 4 (continue from sentence_starter), Stage 5 (original sentence, no scaffolding).
 
 Respond with ONLY valid, compact, single-line JSON, no markdown fences, no extra commentary, no literal line breaks inside any string value, in exactly this shape:
@@ -568,6 +570,7 @@ Respond with ONLY valid, compact, single-line JSON, no markdown fences, no extra
   "correct_answer": "string or null, REQUIRED (non-null) for mcq/true_false/tap_select/reverse_clue, must exactly match one of this turn's options; null for word_bank/letter_connect/text",
   "sentence_starter": "string or null, ONLY at Stage 4: sentence beginning up to where the student continues, don't repeat this text inside message",
   "stage": number (the stage this new question belongs to, 1-5),
+  "grading_reasoning": "string or null, ONLY when you just judged a 'text' answer yourself: one short sentence on why it's correct/incorrect, decided BEFORE hint_given/resolved below, never shown to the student, not used for any other input_type",
   "hint_given": boolean,
   "resolved": boolean,
   "fun_fact": "string or null, only when resolved is true: the varied reward line (fact, joke, or challenge)"
@@ -966,7 +969,59 @@ const COACH_INPUT_TYPES = new Set(["mcq", "true_false", "tap_select", "word_bank
 const COACH_TYPES_NEEDING_OPTIONS = new Set(["mcq", "true_false", "tap_select", "reverse_clue"]);
 const COACH_TYPES_NEEDING_TILES = new Set(["word_bank", "letter_connect"]);
 
-function validateCoachResponse(parsed) {
+// Loose inflection strip (plural/tense endings) so "resilient" also catches
+// a lazily-inflected "resiliently"-style variant used as a distractor.
+function stripInflection(s) {
+  const w = String(s).toLowerCase().trim();
+  return w.replace(/ies$/, "y").replace(/(es|ed|ing|ly|est|er|s)$/, "");
+}
+
+function isTargetWordMatch(candidate, targetWord) {
+  if (!candidate || !targetWord) return false;
+  const a = String(candidate).toLowerCase().trim();
+  const b = String(targetWord).toLowerCase().trim();
+  if (!a || !b) return false;
+  return a === b || stripInflection(a) === stripInflection(b);
+}
+
+// word_bank/letter_connect tiles should be exactly the target word's own
+// letters, shuffled — compares the sorted letter multiset, not the order.
+function tilesMatchWord(tiles, targetWord) {
+  if (!Array.isArray(tiles) || !targetWord) return false;
+  const tileLetters = tiles.map((t) => String(t).toLowerCase().trim()).filter(Boolean).sort().join("");
+  const wordLetters = String(targetWord).toLowerCase().replace(/[^a-z]/g, "").split("").sort().join("");
+  return !!wordLetters && tileLetters === wordLetters;
+}
+
+function stripPunctForCompare(s) {
+  return String(s).toLowerCase().replace(/[.,!?;:"'()]/g, "").trim();
+}
+
+// tap_select/reverse_clue options are supposed to be display_sentence's own
+// words, split individually — confirms an option isn't a hallucinated token
+// that never actually appeared in the sentence.
+function optionInSentence(option, sentence) {
+  const cleanOption = stripPunctForCompare(option);
+  if (!cleanOption) return false;
+  const sentenceWords = stripPunctForCompare(sentence).split(/\s+/);
+  return sentenceWords.includes(cleanOption);
+}
+
+// Loose check for whether a free-typed "text" answer uses the target word in
+// some recognizable form. Deliberately permissive (a stem match, not a full
+// inflection list) — this only exists to catch the word being fully absent,
+// so it should never false-flag a real inflection as "missing."
+function textLikelyContainsWord(text, targetWord) {
+  if (!text || !targetWord) return false;
+  const t = String(text).toLowerCase();
+  const w = String(targetWord).toLowerCase().trim();
+  if (!w) return false;
+  if (t.includes(w)) return true;
+  const stemLen = w.length > 4 ? w.length - 2 : Math.max(3, w.length - 1);
+  return t.includes(w.slice(0, stemLen));
+}
+
+function validateCoachResponse(parsed, targetWordText) {
   if (!parsed || typeof parsed.message !== "string" || !parsed.message.trim()) return false;
   if (typeof parsed.display_sentence !== "string" || !parsed.display_sentence.trim()) return false;
   if (!COACH_INPUT_TYPES.has(parsed.input_type)) return false;
@@ -977,6 +1032,21 @@ function validateCoachResponse(parsed) {
   }
   if (COACH_TYPES_NEEDING_TILES.has(parsed.input_type) && (!Array.isArray(parsed.word_tiles) || parsed.word_tiles.length === 0)) {
     return false;
+  }
+  if (!targetWordText) return true; // no target word available to check content against
+
+  // Content checks: the shape can be perfectly valid JSON while still being
+  // semantically wrong (the target word offered as its own MCQ answer, a
+  // padded/hallucinated letter bank, a tap target that isn't really in the
+  // sentence) — none of that is caught by the shape checks above.
+  if (parsed.input_type === "mcq" && Array.isArray(parsed.options)) {
+    if (parsed.options.some((opt) => isTargetWordMatch(opt, targetWordText))) return false;
+  }
+  if (COACH_TYPES_NEEDING_TILES.has(parsed.input_type) && !tilesMatchWord(parsed.word_tiles, targetWordText)) {
+    return false;
+  }
+  if ((parsed.input_type === "tap_select" || parsed.input_type === "reverse_clue") && Array.isArray(parsed.options)) {
+    if (!parsed.options.every((opt) => optionInSentence(opt, parsed.display_sentence))) return false;
   }
   return true;
 }
@@ -2910,7 +2980,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
     const openingMsg = `Passage: "${passage.text}"\n\nStart coaching for the target word "${targetWord.word}". Begin at Stage 1.`;
     const msgs = [{ role: "user", content: openingMsg }];
     try {
-      const parsed = await callClaudeWithRetry(buildCoachSystemPrompt(avatarConfig.companion, stage1Type, stage2Type, stage3Type), msgs, MAX_RETRY_ATTEMPTS, validateCoachResponse);
+      const parsed = await callClaudeWithRetry(buildCoachSystemPrompt(avatarConfig.companion, stage1Type, stage2Type, stage3Type), msgs, MAX_RETRY_ATTEMPTS, (p) => validateCoachResponse(p, targetWord.word));
       setHistory([...msgs, { role: "assistant", content: JSON.stringify(parsed) }]);
       setCurrent(parsed);
       setStageReached(parsed.stage || 1);
@@ -2953,10 +3023,17 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
     setError(null);
     const correctAnswer = getCorrectAnswerForCurrent();
     const isCorrect = correctAnswer !== null ? answerText.trim().toLowerCase() === correctAnswer.trim().toLowerCase() : null;
-    const factNote = isCorrect === null ? "" : `\n[FACT: this answer is ${isCorrect ? "CORRECT" : "INCORRECT"}. Trust this, don't re-judge correctness yourself this turn.]`;
+    let factNote = isCorrect === null ? "" : `\n[FACT: this answer is ${isCorrect ? "CORRECT" : "INCORRECT"}. Trust this, don't re-judge correctness yourself this turn.]`;
+    // "text" answers have no fixed answer key, the model judges them itself
+    // (see CORRECTNESS in the prompt) — but whether the target word was used
+    // at all is checkable deterministically, so that one sub-question isn't
+    // left entirely to a small model's judgment.
+    if (isCorrect === null && current.input_type === "text" && !textLikelyContainsWord(answerText, targetWord.word)) {
+      factNote += `\n[FACT: the answer does not contain the target word "${targetWord.word}" in any form.]`;
+    }
     const newHistory = [...history, { role: "user", content: answerText + factNote }];
     try {
-      const parsed = await callClaudeWithRetry(buildCoachSystemPrompt(avatarConfig.companion, stage1Type, stage2Type, stage3Type), newHistory, MAX_RETRY_ATTEMPTS, validateCoachResponse);
+      const parsed = await callClaudeWithRetry(buildCoachSystemPrompt(avatarConfig.companion, stage1Type, stage2Type, stage3Type), newHistory, MAX_RETRY_ATTEMPTS, (p) => validateCoachResponse(p, targetWord.word));
       const updatedHistory = [...newHistory, { role: "assistant", content: JSON.stringify(parsed) }];
       setHistory(updatedHistory);
       if (parsed.hint_given) hintsUsedRef.current += 1;
