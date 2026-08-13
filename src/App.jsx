@@ -86,7 +86,48 @@ function FloatingDecor({ density = 6 }) {
   );
 }
 
-const CONFETTI_COLORS = ["#f59e0b", "#0d9488", "#e11d48", "#2563eb", "#84cc16", "#a855f7"];
+// Thick, square-cornered, palette-colored viewport border. Fixed overlay,
+// no ornamentation — the "which mode am I in" cue for the whole screen.
+function OuterFrame({ tone = "gold" }) {
+  const color = tone === "teal" ? "#0d9488" : "#f59e0b";
+  return (
+    <div
+      className="pointer-events-none fixed inset-0"
+      style={{ border: `8px solid ${color}`, zIndex: 9999 }}
+      aria-hidden="true"
+    />
+  );
+}
+
+const AMBIENT_ICONS_GOLD = ["🧭", "🗺️", "⛰️", "🌴", "⛵"];
+const AMBIENT_ICONS_TEAL = ["📊", "📋", "🔍", "📖", "✨"];
+const AMBIENT_ICON_SPOTS = [
+  { top: "4%", left: "3%", size: 160, cls: "float-slow" },
+  { top: "62%", left: "88%", size: 190, cls: "float-med" },
+  { top: "80%", left: "8%", size: 130, cls: "float-slow" },
+];
+// A handful of large, very faint background icons that vary by palette,
+// reinforcing which "mode" (student/gold vs teacher/teal) a screen is in.
+// Reuses the existing float-slow/float-med classes (already covered by the
+// app's prefers-reduced-motion disable list) rather than adding new motion.
+function AmbientIcons({ palette = "gold" }) {
+  const icons = palette === "teal" ? AMBIENT_ICONS_TEAL : AMBIENT_ICONS_GOLD;
+  return (
+    <div className="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden="true">
+      {AMBIENT_ICON_SPOTS.map((spot, i) => (
+        <span
+          key={i}
+          className={`absolute ${spot.cls}`}
+          style={{ top: spot.top, left: spot.left, fontSize: spot.size, opacity: 0.07 }}
+        >
+          {icons[i % icons.length]}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+const CONFETTI_COLORS = ["#f59e0b", "#0d9488", "#fbbf24", "#5eead4", "#ffffff"];
 function Confetti({ count = 40 }) {
   const pieces = Array.from({ length: count }).map((_, i) => ({
     left: `${Math.random() * 100}%`,
@@ -243,6 +284,9 @@ function CompassRose({ size = 220, spin = false, className = "", tone = "gold" }
 // audience of its own. Replaces the old deckle-edge/parchment DECKLE (and
 // KID_CARD) shape.
 const CARD_SHADOW = "0 4px 16px rgba(0,0,0,0.08)";
+// Heavier static shadow for the one "main thing" card on a screen, so it
+// visibly outranks the routine cards around it (which keep CARD_SHADOW).
+const CARD_SHADOW_HERO = "0 10px 28px rgba(0,0,0,0.14)";
 const CARD_GOLD = { borderRadius: "1.5rem", border: "3px solid #f59e0b", boxShadow: CARD_SHADOW };
 const CARD_TEAL = { borderRadius: "1.5rem", border: "3px solid #0d9488", boxShadow: CARD_SHADOW };
 const CARD_NEUTRAL = { borderRadius: "1.5rem", border: "3px solid #e7e5e4", boxShadow: CARD_SHADOW };
@@ -1161,7 +1205,7 @@ function SecretAnimalPicker({ value, onChange }) {
             onClick={() => { if (value.length < SECRET_LENGTH) { SFX.tap(); onChange([...value, a.id]); } }}
             disabled={value.length >= SECRET_LENGTH}
             className="flex flex-col items-center gap-0.5 p-2.5 rounded-2xl bg-white transition-all hover:scale-105 disabled:opacity-40 disabled:hover:scale-100"
-            style={{ border: "2px solid #e7e5e4" }}
+            style={{ border: "3px solid #d6d3d1" }}
             aria-label={a.label}
           >
             <span className="text-2xl">{a.emoji}</span>
@@ -1379,7 +1423,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
       <div className="max-w-4xl mx-auto px-6 py-8 step-in min-h-screen flex flex-col justify-center relative">
         <FloatingDecor density={7} />
         <Header />
-        <div className="relative z-10 bg-white p-2" style={CARD_GOLD}>
+        <div className="relative z-10 bg-white p-2" style={{ ...CARD_GOLD, boxShadow: CARD_SHADOW_HERO }}>
           <div className="grid grid-cols-2">
             {/* Student panel */}
             <div className="p-8 flex flex-col items-center text-center rounded-2xl" style={{ background: "#fffbeb" }}>
@@ -1822,7 +1866,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                       key={h.id}
                       onClick={() => { SFX.tap(); setAvatarConfig((c) => ({ ...c, head: h.id })); }}
                       className={`w-11 h-11 rounded-full flex items-center justify-center text-xl border-3 transition-all ${
-                        avatarConfig.head === h.id ? "border-amber-500 scale-110 bg-amber-50" : "border-stone-200 opacity-70"
+                        avatarConfig.head === h.id ? "border-amber-500 scale-110 bg-amber-50" : "border-stone-300 opacity-70"
                       }`}
                       style={{ borderWidth: "3px" }}
                       title={h.label}
@@ -1843,7 +1887,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                         key={tone.id}
                         onClick={() => { SFX.tap(); setAvatarConfig((c) => ({ ...c, skinTone: tone.mod })); }}
                         className={`w-10 h-10 rounded-full flex items-center justify-center text-lg border-3 transition-all ${
-                          avatarConfig.skinTone === tone.mod ? "border-amber-500 scale-110 bg-amber-50" : "border-stone-200 opacity-70"
+                          avatarConfig.skinTone === tone.mod ? "border-amber-500 scale-110 bg-amber-50" : "border-stone-300 opacity-70"
                         }`}
                         style={{ borderWidth: "3px" }}
                         title={tone.label}
@@ -1882,7 +1926,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                     key={a.id}
                     onClick={() => { SFX.tap(); setAvatarConfig((c) => ({ ...c, accessory: a.id })); }}
                     className={`w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-white flex items-center justify-center text-2xl sm:text-3xl transition-all active:scale-90 ${
-                      avatarConfig.accessory === a.id ? "border-amber-500 scale-110 bg-amber-50" : "border-stone-200 opacity-60 hover:opacity-100"
+                      avatarConfig.accessory === a.id ? "border-amber-500 scale-110 bg-amber-50" : "border-stone-300 opacity-60 hover:opacity-100"
                     }`}
                     style={{ borderWidth: "4px", boxShadow: avatarConfig.accessory === a.id ? "0 2px 8px rgba(0,0,0,0.18)" : "0 1px 3px rgba(0,0,0,0.08)" }}
                     title={a.label}
@@ -2243,17 +2287,17 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, onSwit
       <div className="flex items-center gap-2 mb-5 relative z-10 pl-14 pr-14">
         <CompassRose size={36} />
         <p className="font-display font-800 text-xl sticker-title">G.I.S.T.</p>
-        <SessionTimer startedAt={sessionStartedAt} className="ml-auto font-mono text-xs text-stone-500 bg-white rounded-full px-3 py-1.5 border-2 border-stone-300" />
+        <SessionTimer startedAt={sessionStartedAt} className="ml-auto font-mono text-xs text-stone-500 bg-white rounded-full px-3 py-1.5 border-[3px] border-stone-300" />
         {onSwitchStudent && (
           <button
             onClick={() => { SFX.tap(); onSwitchStudent(); }}
-            className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-2 border-stone-300 shadow-sm"
+            className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-[3px] border-stone-300 shadow-sm"
             title="Save this device for the next student"
           >
             <RotateCcw className="w-3.5 h-3.5" /> New Student
           </button>
         )}
-        <button onClick={() => { SFX.tap(); onOpenTeacher(); }} className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-2 border-stone-300 shadow-sm">
+        <button onClick={() => { SFX.tap(); onOpenTeacher(); }} className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-[3px] border-stone-300 shadow-sm">
           <GraduationCap className="w-3.5 h-3.5" /> Teacher view
         </button>
       </div>
@@ -2285,7 +2329,7 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, onSwit
       </p>
 
       {solvedWords.length === passage.words.length && (
-        <div className="mt-8 p-6 text-center step-in bounce-in" style={{ ...CARD_GOLD, background: "linear-gradient(135deg,#fef3c7,#fed7aa)" }}>
+        <div className="mt-8 p-6 text-center step-in bounce-in" style={{ ...CARD_GOLD, boxShadow: CARD_SHADOW_HERO, background: "linear-gradient(135deg,#fef3c7,#fed7aa)" }}>
           <Trophy className="w-10 h-10 mx-auto mb-2 text-orange-500" />
           <p className="font-display text-2xl font-800 text-stone-700">Adventure complete! 🎉</p>
           {passage.arrival && <p className="font-hand text-xl text-amber-700 mt-2">{passage.arrival}</p>}
@@ -3240,7 +3284,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
               {showSettings && (
                 <div
                   className="absolute top-12 right-0 z-30 bg-white rounded-2xl p-4 step-in"
-                  style={{ border: "2px solid #e7e5e4", boxShadow: CARD_SHADOW, minWidth: "200px" }}
+                  style={{ border: "3px solid #d6d3d1", boxShadow: CARD_SHADOW, minWidth: "200px" }}
                 >
                   <p className="font-display font-800 text-sm text-stone-600 mb-3">⚙️ Settings</p>
                   <button
@@ -3346,7 +3390,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                       {m.from === "coach" && (
                         <button
                           onClick={() => speak(m.text)}
-                          className="shrink-0 mt-0.5 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white border-2 border-stone-200 flex items-center justify-center hover:border-teal-400 hover:bg-teal-50"
+                          className="shrink-0 mt-0.5 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white border-[3px] border-stone-300 flex items-center justify-center hover:border-teal-400 hover:bg-teal-50"
                           title="Read aloud"
                           aria-label="Read this message aloud"
                         >
@@ -3434,9 +3478,9 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                       key={i}
                       onClick={() => submitAnswer(opt)}
                       className="text-left px-4 py-3.5 bg-white rounded-2xl hover:scale-[1.02] font-body font-800 text-lg sm:text-xl text-stone-700 transition-all"
-                      style={{ border: "3px solid #e7e5e4", boxShadow: "0 3px 0 0 #d6d3d1" }}
+                      style={{ border: "3px solid #d6d3d1", boxShadow: "0 3px 0 0 #a8a29e" }}
                       onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#2dd4bf"; e.currentTarget.style.boxShadow = "0 3px 0 0 #0d9488"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#e7e5e4"; e.currentTarget.style.boxShadow = "0 3px 0 0 #d6d3d1"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#d6d3d1"; e.currentTarget.style.boxShadow = "0 3px 0 0 #a8a29e"; }}
                     >
                       {opt}
                     </button>
@@ -3500,7 +3544,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                   {current.sentence_starter && (
                     <div
                       className="flex items-center flex-wrap gap-2 bg-stone-50 rounded-2xl px-4 py-4"
-                      style={{ border: "3px solid #e7e5e4" }}
+                      style={{ border: "3px solid #d6d3d1" }}
                     >
                       <span className="font-body text-lg sm:text-xl text-stone-500 italic">{current.sentence_starter}</span>
                       <input
@@ -3517,7 +3561,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                       value={textInput}
                       onChange={(e) => setTextInput(e.target.value)}
                       placeholder="Type your answer…"
-                      className="w-full bg-white rounded-2xl border-3 border-stone-200 px-4 py-3.5 font-body text-lg sm:text-xl text-stone-700 focus:outline-none focus:border-teal-400"
+                      className="w-full bg-white rounded-2xl border-3 border-stone-300 px-4 py-3.5 font-body text-lg sm:text-xl text-stone-700 focus:outline-none focus:border-teal-400"
                       style={{ borderWidth: "3px" }}
                       autoFocus
                     />
@@ -3586,7 +3630,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                             key={i}
                             onClick={() => handleTransferAnswer(opt, gotItVia, clueIdentified)}
                             className="text-left px-4 py-3 bg-white rounded-2xl hover:scale-[1.02] font-body font-800 text-lg text-stone-700 transition-all"
-                            style={{ border: "3px solid #e7e5e4", boxShadow: "0 3px 0 0 #d6d3d1" }}
+                            style={{ border: "3px solid #d6d3d1", boxShadow: "0 3px 0 0 #a8a29e" }}
                           >
                             {opt}
                           </button>
@@ -3917,7 +3961,7 @@ function ComprehensionScreen({ passage, avatarConfig, onDone }) {
                   key={i}
                   onClick={() => handleAnswer(opt)}
                   className="text-left px-5 py-4 bg-white rounded-2xl hover:scale-[1.02] font-body font-800 text-lg sm:text-xl text-stone-700 transition-all"
-                  style={{ border: "3px solid #e7e5e4", boxShadow: "0 3px 0 0 #d6d3d1" }}
+                  style={{ border: "3px solid #d6d3d1", boxShadow: "0 3px 0 0 #a8a29e" }}
                 >
                   {opt}
                 </button>
@@ -3936,10 +3980,10 @@ function ComprehensionScreen({ passage, avatarConfig, onDone }) {
                     key={i}
                     className="relative text-left px-5 py-4 rounded-2xl font-body font-800 text-lg sm:text-xl transition-all flex items-center justify-between"
                     style={{
-                      border: `3px solid ${isCorrectOpt ? "#059669" : isChosen ? "#e11d48" : "#e7e5e4"}`,
+                      border: `3px solid ${isCorrectOpt ? "#059669" : isChosen ? "#e11d48" : "#d6d3d1"}`,
                       background: isCorrectOpt ? "#d1fae5" : isChosen ? "#fee2e2" : "white",
                       color: showState ? "#292524" : "#78716c",
-                      boxShadow: `0 3px 0 0 ${isCorrectOpt ? "#065f46" : isChosen ? "#9f1239" : "#d6d3d1"}`,
+                      boxShadow: `0 3px 0 0 ${isCorrectOpt ? "#065f46" : isChosen ? "#9f1239" : "#a8a29e"}`,
                     }}
                   >
                     {opt}
@@ -3990,7 +4034,7 @@ function RecapScreen({ studentId, log, avatarConfig, comprehensionResult, onFini
     <div className="max-w-2xl mx-auto px-6 py-10 step-in relative min-h-screen flex flex-col justify-center">
       <FloatingDecor density={6} />
       <Confetti />
-      <div className="bg-white p-6 sm:p-8 relative z-10 text-center" style={CARD_GOLD}>
+      <div className="bg-white p-6 sm:p-8 relative z-10 text-center" style={{ ...CARD_GOLD, boxShadow: CARD_SHADOW_HERO }}>
         <div className="flex items-center justify-center gap-3 mb-2">
           <AvatarDisplay config={avatarConfig} size={64} />
           <span className="text-5xl">{companionEmoji}</span>
@@ -4169,7 +4213,7 @@ function TourScreen({ avatarConfig, passage, onDone, bilingual, onToggleBilingua
             className="font-body text-base text-stone-600 leading-relaxed mb-3"
           />
           <div className="text-left max-w-xs mx-auto mb-3 space-y-1.5">
-            <div className="px-3 py-2 rounded-xl bg-white font-body text-xs text-stone-600" style={{ border: "2px solid #e7e5e4" }}>
+            <div className="px-3 py-2 rounded-xl bg-white font-body text-xs text-stone-600" style={{ border: "3px solid #d6d3d1" }}>
               The robot was very{" "}
               <span className="font-display font-800 px-2 py-0.5 rounded-full inline-block" style={{ background: "linear-gradient(135deg,#fde68a,#fdba74)", boxShadow: "0 2px 0 0 #d97706" }}>
                 amazing
@@ -4184,7 +4228,7 @@ function TourScreen({ avatarConfig, passage, onDone, bilingual, onToggleBilingua
                 🔒 tap to reveal the next part…
               </button>
             ) : (
-              <div className="px-3 py-2 rounded-xl bg-white step-in bounce-in font-body text-xs text-stone-600" style={{ border: "2px solid #e7e5e4" }}>
+              <div className="px-3 py-2 rounded-xl bg-white step-in bounce-in font-body text-xs text-stone-600" style={{ border: "3px solid #d6d3d1" }}>
                 It could even{" "}
                 <span className="font-display font-800 px-2 py-0.5 rounded-full inline-block" style={{ background: "linear-gradient(135deg,#fde68a,#fdba74)", boxShadow: "0 2px 0 0 #d97706" }}>
                   invent
@@ -4272,7 +4316,7 @@ function TourScreen({ avatarConfig, passage, onDone, bilingual, onToggleBilingua
                   onClick={() => handlePracticeAnswer(opt)}
                   className="text-left px-3 py-2 rounded-xl font-body text-xs sm:text-sm transition-all"
                   style={{
-                    border: `2px solid ${answered && isCorrect ? "#059669" : answered && isChosen ? "#e11d48" : "#e7e5e4"}`,
+                    border: `3px solid ${answered && isCorrect ? "#059669" : answered && isChosen ? "#e11d48" : "#d6d3d1"}`,
                     background: answered && isCorrect ? "#d1fae5" : answered && isChosen ? "#fee2e2" : "white",
                     color: answered && !isCorrect && !isChosen ? "#a8a29e" : "#292524",
                   }}
@@ -4556,18 +4600,18 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
           that reaches TeacherScreen (both a real post-session report and
           the sample report from the main menu). */}
       <div className="flex items-center justify-between mb-6 flex-wrap gap-2 relative z-10 pl-14 pr-14">
-        <button onClick={onBack} className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-2 border-stone-200">
+        <button onClick={onBack} className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-[3px] border-stone-300">
           <ChevronLeft className="w-3.5 h-3.5" /> Back
         </button>
         <div className="flex items-center gap-2">
           {hideResetSection ? (
-            <span className="font-mono text-xs text-stone-500 bg-white rounded-full px-3 py-1.5 border-2 border-stone-200">
+            <span className="font-mono text-xs text-stone-500 bg-white rounded-full px-3 py-1.5 border-[3px] border-stone-300">
               📅 {sessionStartedAt ? new Date(sessionStartedAt).toLocaleDateString() : "Past session"}
             </span>
           ) : (
-            <SessionTimer startedAt={sessionStartedAt} className="font-mono text-xs text-stone-500 bg-white rounded-full px-3 py-1.5 border-2 border-stone-200" />
+            <SessionTimer startedAt={sessionStartedAt} className="font-mono text-xs text-stone-500 bg-white rounded-full px-3 py-1.5 border-[3px] border-stone-300" />
           )}
-          <button onClick={() => setShowHelp((s) => !s)} className="font-display font-700 text-xs text-stone-500 bg-white rounded-full px-3 py-1.5 border-2 border-stone-200">
+          <button onClick={() => setShowHelp((s) => !s)} className="font-display font-700 text-xs text-stone-500 bg-white rounded-full px-3 py-1.5 border-[3px] border-stone-300">
             ℹ️ How this works
           </button>
           <span className="flex items-center gap-1 font-display font-700 text-xs text-stone-500">
@@ -4615,7 +4659,7 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
           onChange={(e) => setTeacherNotes(e.target.value)}
           placeholder="e.g. right after recess, usually stronger with reading, had a rough morning…"
           rows={2}
-          className="w-full bg-white rounded-2xl border-2 border-stone-200 px-4 py-2.5 font-body text-sm text-stone-700 focus:outline-none focus:border-teal-400"
+          className="w-full bg-white rounded-2xl border-[3px] border-stone-300 px-4 py-2.5 font-body text-sm text-stone-700 focus:outline-none focus:border-teal-400"
         />
       </div>
 
@@ -4632,7 +4676,7 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
         <div className="relative z-10 mb-6 space-y-4 step-in">
           {/* Summary: the one thing a teacher needs in 5 seconds, shown
               biggest and boldest, everything else is opt-in detail below. */}
-          <div className="p-7 rounded-3xl text-center bounce-in" style={{ background: "linear-gradient(135deg,#ccfbf1,#99f6e4)", border: "4px solid #0d9488" }}>
+          <div className="p-7 rounded-3xl text-center bounce-in" style={{ background: "linear-gradient(135deg,#ccfbf1,#99f6e4)", border: "4px solid #0d9488", boxShadow: CARD_SHADOW_HERO }}>
             <p className="font-display font-800 text-xs uppercase tracking-wide text-teal-800 mb-2">📌 Summary</p>
             <p className="font-display font-800 text-xl sm:text-2xl leading-snug text-teal-950">{summary.summary || summary.corePattern || summary.coreProblem}</p>
           </div>
@@ -4789,7 +4833,7 @@ function TeacherGuideScreen({ onBack }) {
   return (
     <div className="max-w-2xl mx-auto px-6 py-8 step-in relative min-h-screen">
       <FloatingDecor density={4} />
-      <button onClick={onBack} className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-2 border-stone-200 relative z-10 mb-5 ml-14">
+      <button onClick={onBack} className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-[3px] border-stone-300 relative z-10 mb-5 ml-14">
         <ChevronLeft className="w-3.5 h-3.5" /> Back to menu
       </button>
       <h1 className="font-display text-2xl font-800 text-stone-700 mb-1 relative z-10">❓ How G.I.S.T. works</h1>
@@ -4921,7 +4965,7 @@ function FileBoxScreen({ onBack }) {
     return (
       <div className="max-w-2xl mx-auto px-6 py-8 step-in relative min-h-screen">
         <FloatingDecor density={4} />
-        <button onClick={() => setView("roster")} className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-2 border-stone-200 relative z-10 mb-5 ml-14">
+        <button onClick={() => setView("roster")} className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-[3px] border-stone-300 relative z-10 mb-5 ml-14">
           <ChevronLeft className="w-3.5 h-3.5" /> Back to roster
         </button>
         <h1 className="font-display text-2xl font-800 text-stone-700 mb-1 relative z-10">🗃️ {selectedStudent?.fullName}'s sessions</h1>
@@ -4938,7 +4982,7 @@ function FileBoxScreen({ onBack }) {
               key={s.id}
               onClick={() => openSession(s)}
               className="flex items-center gap-3 text-left px-4 py-3.5 bg-white rounded-2xl hover:scale-[1.01] transition-all"
-              style={{ border: "2px solid #e7e5e4" }}
+              style={{ border: "3px solid #d6d3d1" }}
             >
               <span className="text-2xl shrink-0">{s.passageEmoji || "📖"}</span>
               <div className="flex-1">
@@ -4959,7 +5003,7 @@ function FileBoxScreen({ onBack }) {
   return (
     <div className="max-w-2xl mx-auto px-6 py-8 step-in relative min-h-screen">
       <FloatingDecor density={5} />
-      <button onClick={onBack} className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-2 border-stone-200 relative z-10 mb-5 ml-14">
+      <button onClick={onBack} className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-[3px] border-stone-300 relative z-10 mb-5 ml-14">
         <ChevronLeft className="w-3.5 h-3.5" /> Back to menu
       </button>
       <h1 className="font-display text-2xl font-800 text-stone-700 mb-1 relative z-10">🗃️ File Box</h1>
@@ -4976,7 +5020,7 @@ function FileBoxScreen({ onBack }) {
             key={s.id}
             onClick={() => openStudent(s)}
             className="flex items-center justify-between text-left px-4 py-3.5 bg-white rounded-2xl hover:scale-[1.01] transition-all"
-            style={{ border: "2px solid #e7e5e4" }}
+            style={{ border: "3px solid #d6d3d1" }}
           >
             <p className="font-display font-800 text-sm text-stone-700">{s.fullName}</p>
             <p className="font-body text-xs text-stone-500">
@@ -5182,8 +5226,10 @@ export default function App() {
 
   if (!authInfo) {
     return (
-      <div className="min-h-screen text-stone-700" style={{ fontFamily: "ui-sans-serif, system-ui", background: "#FAFAF9" }}>
+      <div className="min-h-screen text-stone-700" style={{ fontFamily: "ui-sans-serif, system-ui", background: "#FAF6EF" }}>
         <FontImport />
+        <OuterFrame tone="teal" />
+        <AmbientIcons palette="teal" />
         <main>
           <AccessGateScreen
             onUnlocked={(token, expiresAt) => {
@@ -5198,8 +5244,10 @@ export default function App() {
 
   if (appClosed) {
     return (
-      <div className="min-h-screen text-stone-700" style={{ fontFamily: "ui-sans-serif, system-ui", background: "#FAFAF9" }}>
+      <div className="min-h-screen text-stone-700" style={{ fontFamily: "ui-sans-serif, system-ui", background: "#FAF6EF" }}>
         <FontImport />
+        <OuterFrame tone="gold" />
+        <AmbientIcons palette="gold" />
         <main>
           <ClosedScreen />
         </main>
@@ -5207,9 +5255,13 @@ export default function App() {
     );
   }
 
+  const mainPalette = ["teacher", "demo-report", "file-box", "teacher-guide"].includes(screen) ? "teal" : "gold";
+
   return (
-    <div className="min-h-screen text-stone-700" style={{ fontFamily: "ui-sans-serif, system-ui", background: "#FAFAF9" }}>
+    <div className="min-h-screen text-stone-700" style={{ fontFamily: "ui-sans-serif, system-ui", background: "#FAF6EF" }}>
       <FontImport />
+      <OuterFrame tone={mainPalette} />
+      <AmbientIcons palette={mainPalette} />
       <CloseButton onClick={() => setShowCloseConfirm(true)} />
       {showCloseConfirm && (
         <CloseConfirmModal
