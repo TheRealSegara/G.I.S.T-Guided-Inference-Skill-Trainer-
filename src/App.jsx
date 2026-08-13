@@ -101,12 +101,15 @@ function OuterFrame({ tone = "gold" }) {
 
 const AMBIENT_ICONS_GOLD = ["🧭", "🗺️", "⛰️", "🌴", "⛵"];
 const AMBIENT_ICONS_TEAL = ["📊", "📋", "🔍", "📖", "✨"];
-// top/left keep every spot within a 8-70% vertical band so it can't crowd
-// a screen's header or footer content on a short landscape tablet (the
-// app's actual target device); size uses clamp() against vh so the icon
-// shrinks with viewport height instead of just overflowing on one.
+// top/left keep every spot within a 16-70% vertical band so it can't crowd
+// a screen's header/footer content on a short landscape tablet (the app's
+// actual target device) — in particular, every screen with AmbientIcons
+// also has the fixed 44px CloseButton/SoundToggle pinned at top-4 left-4 /
+// top-4 right-4, so spots stay clear of both top corners, not just an
+// arbitrary top margin. Size uses clamp() against vh so the icon shrinks
+// with viewport height instead of just overflowing on one.
 const AMBIENT_ICON_SPOTS = [
-  { top: "6%", left: "3%", size: "clamp(70px, 18vh, 160px)", cls: "float-slow" },
+  { top: "16%", left: "3%", size: "clamp(70px, 18vh, 160px)", cls: "float-slow" },
   { top: "52%", left: "88%", size: "clamp(80px, 21vh, 190px)", cls: "float-med" },
   { top: "68%", left: "8%", size: "clamp(65px, 15vh, 130px)", cls: "float-slow" },
 ];
@@ -912,6 +915,14 @@ async function apiRequest(path, { method = "GET", body, token } = {}) {
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
+  // Only the teacher access-code token expiring should trigger the "class
+  // session timed out" re-auth overlay (see onAuthInvalidated in App) —
+  // callClaude already does this for AI calls, but File Box/session/roster
+  // calls through this helper were missing it, silently showing a generic
+  // "couldn't load" error with no way back in. A student token's own 401
+  // (a login/signup credential mismatch, or a rare student-session expiry)
+  // is a completely different, expected situation and must NOT trigger it.
+  if (response.status === 401 && token && token === currentAuthToken) onAuthInvalidated?.();
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const err = new Error(data?.error || "Request failed");
@@ -1908,7 +1919,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                       <button
                         key={tone.id}
                         onClick={() => { SFX.tap(); setAvatarConfig((c) => ({ ...c, skinTone: tone.mod })); }}
-                        className={`w-10 h-10 rounded-full flex items-center justify-center text-lg border-3 transition-all ${
+                        className={`w-11 h-11 rounded-full flex items-center justify-center text-lg border-3 transition-all ${
                           avatarConfig.skinTone === tone.mod ? "border-amber-500 scale-110 bg-amber-50" : "border-stone-300 opacity-70"
                         }`}
                         style={{ borderWidth: "3px" }}
@@ -2250,7 +2261,7 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, onSwit
             <span>{highlightWords(sentence.trim(), `s${i}-`)}</span>
             <button
               onClick={() => speak(sentence.trim())}
-              className="shrink-0 mt-0.5 w-6 h-6 rounded-full bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-xs"
+              className="shrink-0 mt-0.5 w-11 h-11 rounded-full bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-sm"
               title="Read this sentence aloud"
               aria-label="Read this sentence aloud"
             >
@@ -2296,8 +2307,6 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, onSwit
     });
   };
 
-  const theme = getMapTheme(passage.title);
-
   return (
     <div className="max-w-5xl mx-auto px-6 py-8 step-in relative">
       <FloatingDecor density={5} />
@@ -2334,14 +2343,14 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, onSwit
       )}
 
       {passage.mission && solvedWords.length < passage.words.length && (
-        <div className="mb-6 p-4 rounded-2xl flex items-start gap-2" style={{ background: theme.soft, border: `2px dashed ${theme.border}` }}>
+        <div className="mb-6 p-4 rounded-2xl flex items-start gap-2" style={{ background: "#fffbeb", border: "2px dashed #f59e0b" }}>
           <span className="text-2xl shrink-0">🎯</span>
-          <p className="font-hand text-lg leading-snug" style={{ color: theme.text }}>{passage.mission}</p>
+          <p className="font-hand text-lg leading-snug" style={{ color: "#9a3412" }}>{passage.mission}</p>
         </div>
       )}
 
       <div className="bg-white p-6" style={CARD_GOLD}>
-        <h1 className="font-display text-2xl font-800 mb-4 flex items-center gap-2" style={{ color: theme.text }}>
+        <h1 className="font-display text-2xl font-800 mb-4 flex items-center gap-2" style={{ color: "#9a3412" }}>
           <span className="text-3xl">{passage.emoji}</span> {passage.title}
         </h1>
         <div className="font-body text-lg leading-9 text-stone-700" style={{ columnCount: 2, columnGap: "2.5rem" }}>{renderPassage()}</div>
@@ -2552,12 +2561,22 @@ function CloseConfirmModal({ onCancel, onConfirm, screen, studentId }) {
   const cancelRef = useRef(null);
   const confirmRef = useRef(null);
 
+  // Move focus into the dialog on open (the less-destructive "Cancel"
+  // option, so an accidental Enter/Space doesn't close the app). Mount-only
+  // (empty deps) — `onCancel` is a fresh inline arrow function on every
+  // App render, so if this ran on every `onCancel` change it would yank
+  // focus back to Cancel any time something elsewhere in the app happened
+  // to re-render while the modal was open, even after the student had
+  // already tabbed to "Yes, close".
   useEffect(() => {
-    // Move focus into the dialog on open (the less-destructive "Cancel"
-    // option, so an accidental Enter/Space doesn't close the app), and
-    // trap Tab/Shift+Tab between the two buttons so a keyboard user can't
-    // tab into the page content hidden behind the overlay.
     cancelRef.current?.focus();
+    // eslint-disable-next-line
+  }, []);
+
+  // The Tab-trap/Escape listener is safe to re-attach on every `onCancel`
+  // change (unlike the focus() above, re-adding a keydown listener has no
+  // visible side effect), so it can just always call the latest onCancel.
+  useEffect(() => {
     const onKeyDown = (e) => {
       if (e.key === "Escape") { onCancel(); return; }
       if (e.key !== "Tab") return;
@@ -3107,6 +3126,23 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
     }
   }
 
+  // The screen-reader live region (below, in the render) needs to announce
+  // whatever the student's actual next task is. Once a word is solved,
+  // postPhase moves the UI through gotItVia/whichClue/transfer reflection
+  // steps that are static JSX, never appended to `display` — without this,
+  // the live region would go silent right after the "you got it!" message,
+  // even though there's a new question on screen for a sighted student.
+  function getReflectionAnnouncement() {
+    if (postPhase === "gotItVia") return "How did you get it?";
+    if (postPhase === "whichClue") return "Which part gave it away?";
+    if (postPhase === "transfer") {
+      if (transferLoading) return "One more check, a brand-new sentence…";
+      if (transferData && transferPassed === null) return `Same word, new sentence, what does it mean here? ${transferData.sentence}`;
+      if (transferPassed !== null) return transferPassed ? "Nailed it in a brand-new sentence!" : "That's okay, this one was tricky in a new sentence.";
+    }
+    return null;
+  }
+
   async function submitAnswer(answerText, opts = {}) {
     if (!current) return;
     SFX.click();
@@ -3371,7 +3407,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
             content only changes once per new message, not once per
             character — exactly one polite announcement per turn. */}
         <div className="sr-only" aria-live="polite" role="status">
-          {[...display].reverse().find((m) => m.from === "coach")?.text || ""}
+          {getReflectionAnnouncement() || [...display].reverse().find((m) => m.from === "coach")?.text || ""}
         </div>
 
         {/* Single unified box */}
@@ -3385,7 +3421,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
               <p className="text-5xl mb-3">🤔</p>
               <p className="font-hand text-2xl text-stone-500 mb-6">
                 Have you seen the word "{targetWord.word}" before?
-                {bilingual && <span className="block font-body text-stone-400" style={{ fontSize: "0.7em" }}>Pernahkah anda lihat perkataan ini sebelum ini?</span>}
+                {bilingual && <span className="block font-body text-stone-500" style={{ fontSize: "0.75em" }}>Pernahkah anda lihat perkataan ini sebelum ini?</span>}
               </p>
               <div className="flex flex-col gap-3 max-w-xs mx-auto">
                 <ReflectionButton onClick={() => handlePriorAnswer("no")} ms="Tidak, ini baharu bagi saya">🆕 No, it's new to me</ReflectionButton>
@@ -3726,7 +3762,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
             <button
               onClick={() => { SFX.tap(); setActiveSlide((s) => Math.max(0, s - 1)); }}
               disabled={activeSlide === 0}
-              className="w-9 h-9 rounded-full bg-white flex items-center justify-center disabled:opacity-30"
+              className="w-11 h-11 rounded-full bg-white flex items-center justify-center disabled:opacity-30"
               style={{ border: "2px solid #e7e5e4", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
               aria-label="Previous card"
             >
@@ -3738,7 +3774,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
             <button
               onClick={() => { SFX.tap(); setActiveSlide((s) => Math.min(slideGroups.length - 1, s + 1)); }}
               disabled={isLatestSlide}
-              className="w-9 h-9 rounded-full bg-white flex items-center justify-center disabled:opacity-30"
+              className="w-11 h-11 rounded-full bg-white flex items-center justify-center disabled:opacity-30"
               style={{ border: "2px solid #e7e5e4", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
               aria-label="Next card"
             >

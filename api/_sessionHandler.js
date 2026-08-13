@@ -163,6 +163,7 @@ async function handleSave(req, res, claims) {
     final_stage: entry.finalStage,
     hints_used: entry.hintsUsed,
     skipped: entry.skipped,
+    skip_reason: entry.skipReason || null,
     revealed_meaning: entry.revealedMeaning || null,
     prior_knowledge: entry.priorKnowledge || null,
     got_it_via: entry.gotItVia || null,
@@ -216,7 +217,7 @@ async function handleFetch(req, res, claims) {
 
   const { data: words, error: wordsError } = await supabase
     .from("session_words")
-    .select("word, clue_type, concreteness, final_stage, hints_used, skipped, revealed_meaning, prior_knowledge, got_it_via, clue_identified, transfer_passed, time_to_answer_sec, fun_fact, solved_at")
+    .select("word, clue_type, concreteness, final_stage, hints_used, skipped, skip_reason, revealed_meaning, prior_knowledge, got_it_via, clue_identified, transfer_passed, time_to_answer_sec, fun_fact, solved_at")
     .eq("session_id", sessionId)
     .order("solved_at", { ascending: true });
   if (wordsError) {
@@ -243,6 +244,7 @@ async function handleFetch(req, res, claims) {
       finalStage: w.final_stage,
       hintsUsed: w.hints_used,
       skipped: w.skipped,
+      skipReason: w.skip_reason,
       revealedMeaning: w.revealed_meaning,
       priorKnowledge: w.prior_knowledge,
       gotItVia: w.got_it_via,

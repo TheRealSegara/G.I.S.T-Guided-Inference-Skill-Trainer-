@@ -62,6 +62,10 @@ create table if not exists session_words (
   final_stage int,
   hints_used int,
   skipped boolean not null default false,
+  -- Only meaningful when skipped is true: "manual" (student tapped Skip
+  -- right away) vs "stuck_limit" (kept trying for STUCK_WORD_LIMIT
+  -- exchanges and still couldn't land it) — see skipWord() in src/App.jsx.
+  skip_reason text,
   revealed_meaning text,
   prior_knowledge text,
   got_it_via text,
@@ -71,6 +75,11 @@ create table if not exists session_words (
   fun_fact text,
   solved_at timestamptz not null default now()
 );
+
+-- Added after the table already existed in earlier deployments; safe to
+-- re-run against a fresh database too (the column is already present from
+-- the create table above in that case, so this is a no-op there).
+alter table session_words add column if not exists skip_reason text;
 
 create index if not exists session_words_session_id_idx on session_words (session_id);
 
