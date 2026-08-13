@@ -57,6 +57,18 @@ const FontImport = () => (
       .animate-pulse, .animate-bounce {
         animation: none !important;
       }
+      .answer-settle {
+        transition: none !important;
+      }
+    }
+    /* Second pacing-gate phase: answer options render right away but
+       stay dimmed/unpressable until answersEnabled flips, via inline
+       opacity/transform/pointerEvents driven from JS. The transition
+       itself (not the gate timing) is what prefers-reduced-motion
+       above turns off, so reduced-motion users still get the same
+       hold, just without the animated settle. */
+    .answer-settle {
+      transition: opacity 0.25s ease, transform 0.25s ease;
     }
   `}</style>
 );
@@ -435,6 +447,44 @@ const TYPEWRITER_CHAR_MS = 18;
 // defeated by a short coach reply typing out almost instantly.
 const TYPEWRITER_MIN_LOCK_MS = 1100;
 
+// Second phase of the same pacing gate, covering the answer options
+// themselves rather than the coach's message: once the message finishes
+// revealing, the options render immediately (so there's something to
+// read while waiting, not just a placeholder) but stay disabled and
+// visually settling-in for this long, scaled by how much reading the
+// options actually take — a two-option true/false question shouldn't
+// hold as long as a four-option MCQ with long phrases. Applies
+// regardless of prefers-reduced-motion (see appendCoachMessage): the
+// hold itself is a pedagogical pacing gate, not a decorative animation,
+// only the CSS transition is what motion-reduction should skip.
+const OPTIONS_READ_CHAR_MS = 35;
+const OPTIONS_READ_MIN_MS = 900;
+
+// Reads whichever field the upcoming input_type actually shows the
+// student (options for mcq/true_false/tap_select/reverse_clue, tiles for
+// word_bank/letter_connect, the sentence_starter for text) and turns its
+// total length into the hold duration above.
+function computeOptionsReadMs(parsed) {
+  if (!parsed) return OPTIONS_READ_MIN_MS;
+  let text = "";
+  if (Array.isArray(parsed.options)) text = parsed.options.join(" ");
+  else if (Array.isArray(parsed.word_tiles)) text = parsed.word_tiles.join(" ");
+  else if (typeof parsed.sentence_starter === "string") text = parsed.sentence_starter;
+  return Math.max(OPTIONS_READ_MIN_MS, text.length * OPTIONS_READ_CHAR_MS);
+}
+
+// Shared inline style for the settling-in visual: dimmed and slightly
+// scaled down while the options hold is still running, full-strength
+// and un-clickable-no-more once answersEnabled flips. pointerEvents is
+// belt-and-suspenders alongside each button/input's own `disabled`.
+function settlingStyle(answersEnabled) {
+  return {
+    opacity: answersEnabled ? 1 : 0.45,
+    transform: answersEnabled ? "scale(1)" : "scale(0.97)",
+    pointerEvents: answersEnabled ? "auto" : "none",
+  };
+}
+
 // If a word hasn't resolved after this many student answers, auto-reveal
 // it via the same free fallback Skip uses, instead of letting a stuck
 // word consume an unbounded number of AI calls.
@@ -690,7 +740,7 @@ The "words" array must have exactly ${wordCount} entries.`;
 
 const DIAGNOSTIC_SYSTEM_PROMPT = `You are the G.I.S.T. diagnostic engine. G.I.S.T. is purely an assessment tool, it exists to reveal what a student understands, not to be the thing they get taught with again. You read a log of a Malaysian primary school ESL student's completed vocabulary coaching session and produce five separate pieces of teacher-facing output: a one-glance summary plus the four detailed parts below it.
 
-Each log entry contains: the word, its clueType (contrast, definition, example, or inference), its concreteness (abstract or concrete), the stage the student needed to reach to resolve it (1-5, higher means they needed more support), how many hints they used, whether the word was skipped, whether they reported seeing the word before ("priorKnowledge": yes/no/not_sure), how they say they got it ("gotItVia": knew/clues/guessed), which clue phrase they identified as helping them (if any), how long they took to answer in seconds ("timeToAnswerSec"), and, for at most one word this session, a transfer test result (whether they could use the word correctly in a brand-new sentence, "transferPassed": true/false/null). You are also given the whole-passage comprehension check result (correct or incorrect) and the question/answer involved. You may also be given optional teacher notes about the session's context (e.g. "right after recess," "usually stronger with reading"), factor these in wherever relevant, they explain circumstances the log alone can't show, they don't override what the data actually shows.
+Each log entry contains: the word, its clueType (contrast, definition, example, or inference), its concreteness (abstract or concrete), the stage the student needed to reach to resolve it (1-5, higher means they needed more support), how many hints they used, whether the word was skipped, whether they reported seeing the word before ("priorKnowledge": yes/no/not_sure), how they say they got it ("gotItVia": knew/clues/guessed), which clue phrase they identified as helping them (if any), how long they took to answer in seconds ("timeToAnswerSec"), whether that answer landed right at the fastest speed the app physically allows ("answeredAtFloor": true/false — the app already forces a short pause before an answer can be tapped, so true means they had essentially no time beyond that forced pause to actually read the options, a guess-speed click rather than a reasoned one, even if the answer was correct), and, for at most one word this session, a transfer test result (whether they could use the word correctly in a brand-new sentence, "transferPassed": true/false/null). You are also given the whole-passage comprehension check result (correct or incorrect) and the question/answer involved. You may also be given optional teacher notes about the session's context (e.g. "right after recess," "usually stronger with reading"), factor these in wherever relevant, they explain circumstances the log alone can't show, they don't override what the data actually shows.
 
 Entries are listed in chronological order, oldest first, so you can also see how the student's response time and hint use changed across the session, not just which words were hard.
 
@@ -722,7 +772,7 @@ PART 1 — "corePattern" (headline + up to 4 bullets):
 
 PART 2 — "howReliable" (headline + 2-4 bullets):
 - Headline: one plain-language verdict on how much a teacher should trust this session's correct answers overall.
-- Bullets: compare what a student claimed beforehand against what they actually did, and name any mismatch specifically in plain terms (e.g. "said they'd never seen 'exhausted' before, then said afterward they already knew it, worth a quick check with them directly"); note which correct answers are backed by real evidence versus which ones aren't (a fast guess that happened to be right isn't the same as reasoning it out); if a sentence-swap check ran this session, describe its result as the strongest single piece of evidence available, in plain words, not as a named test.
+- Bullets: compare what a student claimed beforehand against what they actually did, and name any mismatch specifically in plain terms (e.g. "said they'd never seen 'exhausted' before, then said afterward they already knew it, worth a quick check with them directly"); note which correct answers are backed by real evidence versus which ones aren't (a fast guess that happened to be right isn't the same as reasoning it out) — if any entries have "answeredAtFloor": true, name those word(s) specifically and note the answer came at guess speed with no real time to read the options, so it's weaker evidence of understanding than the stage/hint count alone would suggest, without implying anything dishonest, it's simply too fast to have been a reasoned read; if a sentence-swap check ran this session, describe its result as the strongest single piece of evidence available, in plain words, not as a named test.
 
 PART 3 — "storyUnderstandingNote" (1-2 sentences, plain text):
 - Given the comprehension check result, write a short line connecting it back to the vocabulary work, made clear that this tests following the actual story, not just knowing individual words.
@@ -2724,12 +2774,12 @@ function speak(text) {
 }
 
 /* ---------------- Coach Screen ---------------- */
-function WordBankWidget({ tiles, onSubmit }) {
+function WordBankWidget({ tiles, onSubmit, disabled = false }) {
   const [used, setUsed] = useState([]);
   const building = used.map((i) => tiles[i]).join("");
 
   function tapTile(i) {
-    if (used.includes(i)) return;
+    if (disabled || used.includes(i)) return;
     SFX.tap();
     setUsed((u) => [...u, i]);
   }
@@ -2758,7 +2808,7 @@ function WordBankWidget({ tiles, onSubmit }) {
           return (
             <button
               key={i}
-              disabled={isUsed}
+              disabled={isUsed || disabled}
               onClick={() => tapTile(i)}
               className={`w-11 h-11 rounded-lg font-display font-800 text-xl uppercase transition-all hover:scale-105 ${
                 isUsed ? "bg-teal-100 text-teal-700 scale-90" : "bg-amber-100 text-stone-800"
@@ -2771,10 +2821,10 @@ function WordBankWidget({ tiles, onSubmit }) {
         })}
       </div>
       <div className="flex items-center justify-center gap-3">
-        <BigButton silent variant="ghost" onClick={removeLast} disabled={used.length === 0}>
+        <BigButton silent variant="ghost" onClick={removeLast} disabled={used.length === 0 || disabled}>
           ⌫ Remove
         </BigButton>
-        <BigButton onClick={() => onSubmit(building)} disabled={used.length === 0}>
+        <BigButton onClick={() => onSubmit(building)} disabled={used.length === 0 || disabled}>
           Submit
         </BigButton>
       </div>
@@ -2782,7 +2832,7 @@ function WordBankWidget({ tiles, onSubmit }) {
   );
 }
 
-function LetterConnectWidget({ tiles, onSubmit }) {
+function LetterConnectWidget({ tiles, onSubmit, disabled = false }) {
   const [used, setUsed] = useState([]);
   const building = used.map((i) => tiles[i]).join("");
   const n = tiles.length;
@@ -2797,7 +2847,7 @@ function LetterConnectWidget({ tiles, onSubmit }) {
   });
 
   function tapTile(i) {
-    if (used.includes(i)) return;
+    if (disabled || used.includes(i)) return;
     SFX.tap();
     setUsed((u) => [...u, i]);
   }
@@ -2847,7 +2897,7 @@ function LetterConnectWidget({ tiles, onSubmit }) {
           return (
             <button
               key={i}
-              disabled={isUsed}
+              disabled={isUsed || disabled}
               onClick={() => tapTile(i)}
               className={`absolute w-11 h-11 rounded-full font-display font-800 text-lg uppercase flex items-center justify-center transition-all hover:scale-110 ${
                 isUsed ? "bg-teal-100 text-teal-700 scale-90" : "bg-amber-100 text-stone-800"
@@ -2867,10 +2917,10 @@ function LetterConnectWidget({ tiles, onSubmit }) {
       </div>
 
       <div className="flex items-center justify-center gap-3 mt-4">
-        <BigButton silent variant="ghost" onClick={removeLast} disabled={used.length === 0}>
+        <BigButton silent variant="ghost" onClick={removeLast} disabled={used.length === 0 || disabled}>
           ⌫ Remove
         </BigButton>
-        <BigButton onClick={() => onSubmit(building)} disabled={used.length === 0}>
+        <BigButton onClick={() => onSubmit(building)} disabled={used.length === 0 || disabled}>
           Submit
         </BigButton>
       </div>
@@ -2959,41 +3009,57 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
   const [transferData, setTransferData] = useState(null);
   const [transferPassed, setTransferPassed] = useState(null);
   const wordStartRef = useRef(null);
+  // Sum of every pacing-gate hold (both phases) enforced on this word so
+  // far, in ms. Compared against the actual timeToAnswerSec at
+  // resolution to flag answers that landed right at the enforced floor
+  // (see appendCoachMessage and computeAtAGlance/logForModel).
+  const gateMsAccumRef = useRef(0);
   const resolvedBaseRef = useRef(null);
   const [pacingElapsed, setPacingElapsed] = useState(0);
 
-  // Typewriter reveal + pacing gate: a coach message is revealed
-  // letter-by-letter, and (when opts.lockAnswers is set) the answer
-  // controls stay hidden until it finishes, with a minimum lock duration
-  // so even a one-word message doesn't unlock instantly. One mechanism
-  // serves both the "coach is typing" UX and the "read before you click"
-  // goal, instead of two separate ones.
+  // Typewriter reveal + two-phase pacing gate: a coach message is
+  // revealed letter-by-letter, and (when opts.lockAnswers is set) the
+  // answer controls stay hidden until it finishes (answersLocked), with a
+  // minimum lock duration so even a one-word message doesn't unlock
+  // instantly. Once that clears, the options render right away — so
+  // there's something to actually read while waiting, not just a "read
+  // the message" placeholder — but stay disabled and visually settling
+  // in for a second phase (answersEnabled) scaled by how much the
+  // options themselves take to read (see OPTIONS_READ_CHAR_MS above).
   const [typingIndex, setTypingIndex] = useState(null);
   const [revealedLength, setRevealedLength] = useState(0);
   const [answersLocked, setAnswersLocked] = useState(false);
+  const [answersEnabled, setAnswersEnabled] = useState(false);
   const typewriterTimerRef = useRef(null);
   const lockTimerRef = useRef(null);
+  const enableTimerRef = useRef(null);
 
   useEffect(() => {
     return () => {
       if (typewriterTimerRef.current) clearInterval(typewriterTimerRef.current);
       if (lockTimerRef.current) clearTimeout(lockTimerRef.current);
+      if (enableTimerRef.current) clearTimeout(enableTimerRef.current);
     };
   }, []);
 
   function appendCoachMessage(entry, opts = {}) {
     const lockAnswers = opts.lockAnswers ?? false;
+    const optionsReadMs = opts.optionsReadMs ?? OPTIONS_READ_MIN_MS;
     const idx = display.length;
     setDisplay((d) => [...d, entry]);
 
     if (typewriterTimerRef.current) clearInterval(typewriterTimerRef.current);
     if (lockTimerRef.current) clearTimeout(lockTimerRef.current);
+    if (enableTimerRef.current) clearTimeout(enableTimerRef.current);
 
     const text = entry.text || "";
     const reduceMotion = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     const totalMs = reduceMotion ? 0 : text.length * TYPEWRITER_CHAR_MS;
 
-    if (lockAnswers) setAnswersLocked(true);
+    if (lockAnswers) {
+      setAnswersLocked(true);
+      setAnswersEnabled(false);
+    }
 
     if (reduceMotion) {
       setTypingIndex(null);
@@ -3015,9 +3081,18 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
 
     if (lockAnswers) {
       const lockDuration = Math.max(TYPEWRITER_MIN_LOCK_MS, totalMs);
+      gateMsAccumRef.current += lockDuration + optionsReadMs;
       lockTimerRef.current = setTimeout(() => {
         setAnswersLocked(false);
         lockTimerRef.current = null;
+        // Second phase starts only once the first clears — the options
+        // are now rendered (see the render conditions below) but stay
+        // disabled and settling-in for this long before submitAnswer can
+        // actually be called.
+        enableTimerRef.current = setTimeout(() => {
+          setAnswersEnabled(true);
+          enableTimerRef.current = null;
+        }, optionsReadMs);
       }, lockDuration);
     }
   }
@@ -3075,6 +3150,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
         clueIdentified: null,
         transferPassed: null,
         timeToAnswerSec: wordStartRef.current ? Math.round((Date.now() - wordStartRef.current) / 1000) : null,
+        minGateSec: Math.round(gateMsAccumRef.current / 1000),
       });
     }, 2200);
   }
@@ -3100,6 +3176,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
     setPriorKnowledge(value);
     setPrePhase("coaching");
     wordStartRef.current = Date.now();
+    gateMsAccumRef.current = 0;
     startWord();
   }
 
@@ -3114,7 +3191,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
       setHistory([...msgs, { role: "assistant", content: JSON.stringify(parsed) }]);
       setCurrent(parsed);
       setStageReached(parsed.stage || 1);
-      appendCoachMessage({ from: "coach", text: parsed.message, hint: parsed.hint_given, stage: parsed.stage }, { lockAnswers: true });
+      appendCoachMessage({ from: "coach", text: parsed.message, hint: parsed.hint_given, stage: parsed.stage }, { lockAnswers: true, optionsReadMs: computeOptionsReadMs(parsed) });
       if (parsed.hint_given) hintsUsedRef.current += 1;
       if (soundEnabled) setTimeout(() => speak(parsed.message), 300);
     } catch (e) {
@@ -3219,7 +3296,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
           return;
         }
         if (parsed.hint_given) { SFX.hint(); } else { SFX.correct(); }
-        appendCoachMessage({ from: "coach", text: parsed.message, hint: parsed.hint_given, stage: parsed.stage }, { lockAnswers: true });
+        appendCoachMessage({ from: "coach", text: parsed.message, hint: parsed.hint_given, stage: parsed.stage }, { lockAnswers: true, optionsReadMs: computeOptionsReadMs(parsed) });
         setCurrent(parsed);
         if (soundEnabled) setTimeout(() => speak(parsed.message), 350);
       }
@@ -3303,6 +3380,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
       clueIdentified: clueValue,
       transferPassed: transferResult,
       timeToAnswerSec: wordStartRef.current ? Math.round((Date.now() - wordStartRef.current) / 1000) : null,
+      minGateSec: Math.round(gateMsAccumRef.current / 1000),
     });
   }
 
@@ -3591,11 +3669,12 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
               )}
 
               {isLatestSlide && postPhase === null && !loading && !answersLocked && current && current.input_type === "mcq" && current.options && (
-                <div className="grid grid-cols-1 gap-3 step-in">
+                <div className="grid grid-cols-1 gap-3 step-in answer-settle" style={settlingStyle(answersEnabled)}>
                   {current.options.map((opt, i) => (
                     <button
                       key={i}
                       onClick={() => submitAnswer(opt)}
+                      disabled={!answersEnabled}
                       className="text-left px-4 py-3.5 bg-white rounded-2xl hover:scale-[1.02] font-body font-800 text-lg sm:text-xl text-stone-700 transition-all"
                       style={{ border: "3px solid #d6d3d1", boxShadow: "0 3px 0 0 #a8a29e" }}
                       onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#2dd4bf"; e.currentTarget.style.boxShadow = "0 3px 0 0 #0d9488"; }}
@@ -3608,11 +3687,12 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
               )}
 
               {isLatestSlide && postPhase === null && !loading && !answersLocked && current && current.input_type === "true_false" && current.options && (
-                <div className="grid grid-cols-2 gap-3 step-in">
+                <div className="grid grid-cols-2 gap-3 step-in answer-settle" style={settlingStyle(answersEnabled)}>
                   {current.options.map((opt, i) => (
                     <button
                       key={i}
                       onClick={() => submitAnswer(opt)}
+                      disabled={!answersEnabled}
                       className="py-5 sm:py-7 rounded-2xl font-display font-800 text-xl sm:text-3xl text-white transition-all hover:scale-105"
                       style={{
                         background: opt.toLowerCase() === "true" ? "linear-gradient(180deg,#34d399,#059669)" : "linear-gradient(180deg,#fb7185,#e11d48)",
@@ -3626,11 +3706,12 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
               )}
 
               {isLatestSlide && postPhase === null && !loading && !answersLocked && current && (current.input_type === "tap_select" || current.input_type === "reverse_clue") && current.options && (
-                <div className="flex flex-wrap gap-3 justify-center step-in">
+                <div className="flex flex-wrap gap-3 justify-center step-in answer-settle" style={settlingStyle(answersEnabled)}>
                   {current.options.map((word, i) => (
                     <button
                       key={i}
                       onClick={() => submitAnswer(word)}
+                      disabled={!answersEnabled}
                       className="px-4 py-2.5 bg-white rounded-full font-display font-700 text-lg sm:text-xl text-stone-700 transition-all hover:scale-110"
                       style={{ border: current.input_type === "reverse_clue" ? "3px solid #0d9488" : "3px solid #f59e0b", boxShadow: current.input_type === "reverse_clue" ? "0 3px 0 0 #0f766e" : "0 3px 0 0 #c2410c" }}
                     >
@@ -3641,11 +3722,15 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
               )}
 
               {isLatestSlide && postPhase === null && !loading && !answersLocked && current && current.input_type === "word_bank" && current.word_tiles && (
-                <WordBankWidget key={current.stage + "-" + current.word_tiles.join("")} tiles={current.word_tiles} onSubmit={submitAnswer} />
+                <div className="answer-settle" style={settlingStyle(answersEnabled)}>
+                  <WordBankWidget key={current.stage + "-" + current.word_tiles.join("")} tiles={current.word_tiles} onSubmit={submitAnswer} disabled={!answersEnabled} />
+                </div>
               )}
 
               {isLatestSlide && postPhase === null && !loading && !answersLocked && current && current.input_type === "letter_connect" && current.word_tiles && (
-                <LetterConnectWidget key={current.stage + "-" + current.word_tiles.join("")} tiles={current.word_tiles} onSubmit={submitAnswer} />
+                <div className="answer-settle" style={settlingStyle(answersEnabled)}>
+                  <LetterConnectWidget key={current.stage + "-" + current.word_tiles.join("")} tiles={current.word_tiles} onSubmit={submitAnswer} disabled={!answersEnabled} />
+                </div>
               )}
 
               {isLatestSlide && postPhase === null && !loading && !answersLocked && current && current.input_type === "text" && (
@@ -3658,7 +3743,8 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                       : textInput.trim();
                     submitAnswer(fullAnswer);
                   }}
-                  className="flex flex-col gap-2 step-in"
+                  className="flex flex-col gap-2 step-in answer-settle"
+                  style={settlingStyle(answersEnabled)}
                 >
                   {current.sentence_starter && (
                     <div
@@ -3672,6 +3758,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                         placeholder="...finish it here"
                         className="flex-1 min-w-[100px] bg-transparent font-body text-lg sm:text-xl text-stone-700 focus:outline-none"
                         autoFocus
+                        disabled={!answersEnabled}
                       />
                     </div>
                   )}
@@ -3683,6 +3770,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                       className="w-full bg-white rounded-2xl border-3 border-stone-300 px-4 py-3.5 font-body text-lg sm:text-xl text-stone-700 focus:outline-none focus:border-teal-400"
                       style={{ borderWidth: "3px" }}
                       autoFocus
+                      disabled={!answersEnabled}
                     />
                   )}
                   <BigButton
@@ -3694,7 +3782,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                         : textInput.trim();
                       submitAnswer(fullAnswer);
                     }}
-                    disabled={!textInput.trim()}
+                    disabled={!textInput.trim() || !answersEnabled}
                   >
                     Send
                   </BigButton>
@@ -4234,6 +4322,24 @@ function RecapScreen({ studentId, log, avatarConfig, comprehensionResult, onFini
   );
 }
 
+// Small slack margin (seconds) on top of the enforced pacing-gate floor
+// so answering just after the floor, rather than exactly on it, isn't
+// treated as a false positive — real reading/clicking always costs a
+// little more than the bare minimum even at genuine speed.
+const GATE_FLOOR_SLACK_SEC = 2;
+
+// True when a resolved word's total time barely exceeds the pacing
+// gate's enforced minimum for that word (see gateMsAccumRef in
+// CoachScreen) — i.e. the student had essentially no time to actually
+// read the options beyond the hold the UI already forces, a signal the
+// diagnostic report can use to flag that specific answer as a guess
+// rather than a not-generalize-worthy comment on the whole session.
+function answeredAtGateFloor(entry) {
+  if (!entry || entry.skipped) return false;
+  if (entry.timeToAnswerSec == null || entry.minGateSec == null) return false;
+  return entry.timeToAnswerSec <= entry.minGateSec + GATE_FLOOR_SLACK_SEC;
+}
+
 function computeAtAGlance(log) {
   const solved = log.filter((e) => !e.skipped);
   const independent = solved.filter((e) => e.hintsUsed === 0).length;
@@ -4670,18 +4776,22 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
     setLoading(true);
     setError(null);
     setSummary(null);
-    const logForModel = log.map(({ word, clueType, concreteness, finalStage, hintsUsed, skipped, skipReason, priorKnowledge, gotItVia, clueIdentified, transferPassed, timeToAnswerSec }) => ({
-      word, clueType, concreteness, finalStage, hintsUsed, skipped: !!skipped,
-      // Only meaningful when skipped is true: "manual" = gave up right
-      // away, "stuck_limit" = kept trying and genuinely couldn't land it —
-      // a real difference for a diagnostic report to reason about.
-      skipReason: skipped ? skipReason || "manual" : null,
-      priorKnowledge: priorKnowledge || null,
-      gotItVia: gotItVia || null,
-      clueIdentified: clueIdentified || null,
-      transferPassed: transferPassed === undefined ? null : transferPassed,
-      timeToAnswerSec: timeToAnswerSec || null,
-    }));
+    const logForModel = log.map((entry) => {
+      const { word, clueType, concreteness, finalStage, hintsUsed, skipped, skipReason, priorKnowledge, gotItVia, clueIdentified, transferPassed, timeToAnswerSec } = entry;
+      return {
+        word, clueType, concreteness, finalStage, hintsUsed, skipped: !!skipped,
+        // Only meaningful when skipped is true: "manual" = gave up right
+        // away, "stuck_limit" = kept trying and genuinely couldn't land it —
+        // a real difference for a diagnostic report to reason about.
+        skipReason: skipped ? skipReason || "manual" : null,
+        priorKnowledge: priorKnowledge || null,
+        gotItVia: gotItVia || null,
+        clueIdentified: clueIdentified || null,
+        transferPassed: transferPassed === undefined ? null : transferPassed,
+        timeToAnswerSec: timeToAnswerSec || null,
+        answeredAtFloor: answeredAtGateFloor(entry),
+      };
+    });
     const comprehensionForModel = comprehensionResult && comprehensionResult.ran
       ? { correct: comprehensionResult.correct, question: comprehensionResult.question }
       : { correct: null, question: null, note: "No comprehension check ran this session." };
