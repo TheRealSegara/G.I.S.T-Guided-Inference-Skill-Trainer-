@@ -21,7 +21,8 @@ const FontImport = () => (
     .float-med { animation: float 3.5s ease-in-out infinite; }
     @keyframes wiggle { 0%,100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); } }
     .wiggle { animation: wiggle 2.2s ease-in-out infinite; }
-    .sticker-title { color: #78350f; text-shadow: 3px 3px 0 #fde68a, 5px 5px 0 rgba(120,53,15,0.15); }
+    .sticker-title { color: #9a3412; }
+    .sticker-title-teal { color: #134e4a; }
     @keyframes spin-slow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     .spin-slow { animation: spin-slow 90s linear infinite; }
     @keyframes confettiFall {
@@ -128,7 +129,7 @@ function PersistentCompanion({ avatarConfig, size = "text-6xl" }) {
     >
       <span
         className={`${size} inline-block rounded-full bg-white ${speaking ? "companion-speaking" : ""}`}
-        style={{ border: "3px solid #f59e0b", boxShadow: "0 5px 0 0 #b45309", padding: "0.15em 0.2em", lineHeight: 1 }}
+        style={{ border: "2px solid #e7e5e4", boxShadow: "0 1px 3px rgba(0,0,0,0.1)", padding: "0.15em 0.2em", lineHeight: 1 }}
       >
         {companionEmoji}
       </span>
@@ -208,78 +209,43 @@ function CloudPuff({ count = 6 }) {
 }
 
 /* ---------------- Content data ---------------- */
-function PaperGrain() {
-  return (
-    <svg className="fixed inset-0 w-full h-full pointer-events-none" style={{ opacity: 0.5, mixBlendMode: "multiply" }} aria-hidden="true">
-      <filter id="grain">
-        <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch" result="noise" />
-        <feColorMatrix in="noise" type="matrix" values="0 0 0 0 0.42  0 0 0 0 0.30  0 0 0 0 0.12  0 0 0 0.45 0" />
-      </filter>
-      <rect width="100%" height="100%" filter="url(#grain)" />
-    </svg>
-  );
-}
-
-function CompassRose({ size = 220, spin = false, className = "" }) {
+// Small logo mark, used on the 3 screen headers (main menu, PassageScreen,
+// AccessGateScreen) — recolors per `tone` to match that screen's palette
+// (gold for student-facing screens, teal for the teacher-facing access gate).
+function CompassRose({ size = 220, spin = false, className = "", tone = "gold" }) {
+  const palette = tone === "teal"
+    ? { ring: "#0f766e", star: "#0d9488", center: "#134e4a" }
+    : { ring: "#c2410c", star: "#f59e0b", center: "#9a3412" };
   return (
     <svg viewBox="0 0 200 200" width={size} height={size} className={`${className} ${spin ? "spin-slow" : ""}`} aria-hidden="true">
-      <circle cx="100" cy="100" r="94" fill="none" stroke="#92400e" strokeWidth="2" opacity="0.55" />
-      <circle cx="100" cy="100" r="78" fill="none" stroke="#92400e" strokeWidth="1" opacity="0.4" />
+      <circle cx="100" cy="100" r="94" fill="none" stroke={palette.ring} strokeWidth="2" opacity="0.55" />
+      <circle cx="100" cy="100" r="78" fill="none" stroke={palette.ring} strokeWidth="1" opacity="0.4" />
       <g opacity="0.6">
-        <polygon points="100,8 111,100 100,192 89,100" fill="#b45309" />
-        <polygon points="8,100 100,89 192,100 100,111" fill="#b45309" />
+        <polygon points="100,8 111,100 100,192 89,100" fill={palette.star} />
+        <polygon points="8,100 100,89 192,100 100,111" fill={palette.star} />
       </g>
       <g opacity="0.35" transform="rotate(45 100 100)">
-        <polygon points="100,28 106,100 100,172 94,100" fill="#b45309" />
-        <polygon points="28,100 100,94 172,100 100,106" fill="#b45309" />
+        <polygon points="100,28 106,100 100,172 94,100" fill={palette.star} />
+        <polygon points="28,100 100,94 172,100 100,106" fill={palette.star} />
       </g>
-      <circle cx="100" cy="100" r="7" fill="#78350f" />
-      <text x="100" y="26" textAnchor="middle" fontSize="15" fontWeight="800" fill="#78350f" fontFamily="Baloo 2, cursive">N</text>
-      <text x="100" y="182" textAnchor="middle" fontSize="15" fontWeight="800" fill="#78350f" fontFamily="Baloo 2, cursive">S</text>
-      <text x="17" y="105" textAnchor="middle" fontSize="15" fontWeight="800" fill="#78350f" fontFamily="Baloo 2, cursive">W</text>
-      <text x="183" y="105" textAnchor="middle" fontSize="15" fontWeight="800" fill="#78350f" fontFamily="Baloo 2, cursive">E</text>
+      <circle cx="100" cy="100" r="7" fill={palette.center} />
+      <text x="100" y="26" textAnchor="middle" fontSize="15" fontWeight="800" fill={palette.center} fontFamily="Baloo 2, cursive">N</text>
+      <text x="100" y="182" textAnchor="middle" fontSize="15" fontWeight="800" fill={palette.center} fontFamily="Baloo 2, cursive">S</text>
+      <text x="17" y="105" textAnchor="middle" fontSize="15" fontWeight="800" fill={palette.center} fontFamily="Baloo 2, cursive">W</text>
+      <text x="183" y="105" textAnchor="middle" fontSize="15" fontWeight="800" fill={palette.center} fontFamily="Baloo 2, cursive">E</text>
     </svg>
   );
 }
 
-function ScreenFrame() {
-  return (
-    <div className="fixed inset-0" style={{ zIndex: 9999, pointerEvents: "none" }}>
-      <div
-        className="absolute inset-0"
-        style={{
-          border: "9px solid #b45309",
-          boxShadow: "inset 0 0 0 3px #78350f, inset 0 0 30px rgba(120,53,15,0.22)",
-        }}
-      />
-      <div className="absolute -top-2 -left-2 opacity-30"><CompassRose size={46} /></div>
-      <div className="absolute -top-2 -right-2 opacity-30"><CompassRose size={46} /></div>
-      <div className="absolute -bottom-2 -left-2 opacity-30"><CompassRose size={46} /></div>
-      <div className="absolute -bottom-2 -right-2 opacity-30"><CompassRose size={46} /></div>
-    </div>
-  );
-}
-
-const DECKLE = {
-  borderRadius: "255px 18px 225px 18px / 18px 225px 18px 255px",
-  border: "3px solid #b45309",
-  boxShadow: "7px 7px 0 rgba(120,53,15,0.16)",
-};
-
-// Lighter, fully-rounded card style for student-facing screens, no torn edge, brighter border
-const KID_CARD = {
-  borderRadius: "32px",
-  border: "3px solid #fb923c",
-  boxShadow: "0 6px 0 0 #f97316",
-};
-
-function CompassWatermark() {
-  return (
-    <div className="pointer-events-none fixed inset-0 flex items-center justify-center overflow-hidden" style={{ opacity: 0.06 }} aria-hidden="true">
-      <CompassRose size={640} spin />
-    </div>
-  );
-}
+// Clean rounded-card shape, shared everywhere, in three border tones: gold
+// for student-facing screens, teal for teacher-facing screens, neutral for
+// plain containers (like the cross-cutting close-confirm modal) with no
+// audience of its own. Replaces the old deckle-edge/parchment DECKLE (and
+// KID_CARD) shape.
+const CARD_SHADOW = "0 4px 16px rgba(0,0,0,0.08)";
+const CARD_GOLD = { borderRadius: "1.5rem", border: "3px solid #f59e0b", boxShadow: CARD_SHADOW };
+const CARD_TEAL = { borderRadius: "1.5rem", border: "3px solid #0d9488", boxShadow: CARD_SHADOW };
+const CARD_NEUTRAL = { borderRadius: "1.5rem", border: "3px solid #e7e5e4", boxShadow: CARD_SHADOW };
 
 const AVATAR_HEADS = [
   { id: "child", base: "🧒", label: "Explorer" },
@@ -1327,7 +1293,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
     <div className="text-center mb-4 relative z-10">
       <div className="flex justify-center mb-1"><CompassRose size={84} /></div>
       <h1 className="font-display text-7xl font-800 sticker-title mb-1">G.I.S.T.</h1>
-      <p className="font-hand text-2xl text-amber-800 bg-white inline-block px-4 py-1 -rotate-2" style={{ borderRadius: "40px 8px 40px 8px", border: "2px solid #b45309" }}>chart your word-clue adventure!</p>
+      <p className="font-hand text-2xl text-amber-800 bg-white inline-block px-4 py-1 -rotate-2" style={{ borderRadius: "40px 8px 40px 8px", border: "2px solid #f59e0b" }}>chart your word-clue adventure!</p>
     </div>
   );
 
@@ -1343,10 +1309,10 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
       <div className="max-w-4xl mx-auto px-6 py-8 step-in min-h-screen flex flex-col justify-center relative">
         <FloatingDecor density={7} />
         <Header />
-        <div className="relative z-10 bg-white p-2" style={DECKLE}>
+        <div className="relative z-10 bg-white p-2" style={CARD_GOLD}>
           <div className="grid grid-cols-2">
             {/* Student panel */}
-            <div className="p-8 flex flex-col items-center text-center rounded-2xl" style={{ background: "#FEF3D7" }}>
+            <div className="p-8 flex flex-col items-center text-center rounded-2xl" style={{ background: "#fffbeb" }}>
               <p className="font-display font-800 text-sm uppercase tracking-wide text-amber-700 mb-2">For Students</p>
               <span className="text-5xl mb-3">🔍</span>
               <p className="font-body text-sm text-stone-600 leading-relaxed mb-5 max-w-[220px]">
@@ -1357,8 +1323,8 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
               </BigButton>
               <button
                 onClick={() => { SFX.tap(); setAfterTour("menu"); setMode("tour"); }}
-                className="mt-3 font-display font-700 text-xs text-teal-700 hover:text-teal-900 bg-white rounded-full px-3 py-1.5 border-2"
-                style={{ borderColor: "#0d9488" }}
+                className="mt-3 font-display font-700 text-xs text-amber-700 hover:text-amber-900 bg-white rounded-full px-3 py-1.5 border-2"
+                style={{ borderColor: "#f59e0b" }}
               >
                 ❓ How to play (see the tutorial again)
               </button>
@@ -1368,7 +1334,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
             <div className="absolute left-1/2 top-8 bottom-8 w-px bg-stone-200" />
 
             {/* Teacher panel */}
-            <div className="p-8 flex flex-col items-center text-center rounded-2xl" style={{ background: "#F1EFEA" }}>
+            <div className="p-8 flex flex-col items-center text-center rounded-2xl" style={{ background: "#f0fdfa" }}>
               <p className="font-display font-800 text-sm uppercase tracking-wide text-stone-600 mb-2">For Teachers</p>
               <span className="text-5xl mb-3">🧑‍🏫</span>
               <p className="font-body text-sm text-stone-600 leading-relaxed mb-5 max-w-[240px]">
@@ -1421,7 +1387,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
         <FloatingDecor density={7} />
 
         {makerSaved ? (
-          <div className="bg-white p-8 step-in relative z-10 text-center" style={DECKLE}>
+          <div className="bg-white p-8 step-in relative z-10 text-center" style={CARD_TEAL}>
             <p className="text-5xl mb-4">✅</p>
             <h1 className="font-display font-800 text-xl text-stone-700 block mb-2 text-center">Map saved!</h1>
             <p className="font-body text-sm text-stone-500 mb-6">It's ready for a student to play. Hand over the device and tap Start Playing.</p>
@@ -1435,26 +1401,26 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
             </div>
           </div>
         ) : (
-          <div className="bg-white p-8 step-in relative z-10" style={DECKLE}>
+          <div className="bg-white p-8 step-in relative z-10" style={CARD_TEAL}>
             <p className="text-4xl text-center mb-4">🛠️</p>
             <h1 className="font-display font-800 text-xl text-stone-700 block mb-2 text-center">Create your own map</h1>
             <p className="font-body text-xs text-stone-500 text-center mb-5">Paste a passage (about 80-150 words). The AI will pick {SESSION_WORD_COUNT} good target words with real context clues.</p>
 
-            <label className="font-display font-700 text-xs uppercase tracking-wide text-amber-700 block mb-2">Map title</label>
+            <label className="font-display font-700 text-xs uppercase tracking-wide text-teal-700 block mb-2">Map title</label>
             <input
               value={makerTitle}
               onChange={(e) => setMakerTitle(e.target.value)}
               placeholder="e.g. A Day at the Market"
-              className="w-full bg-amber-50 rounded-2xl border-2 border-amber-300 px-4 py-3 font-body text-stone-700 mb-4 focus:outline-none focus:border-amber-500"
+              className="w-full bg-teal-50 rounded-2xl border-2 border-teal-300 px-4 py-3 font-body text-stone-700 mb-4 focus:outline-none focus:border-teal-500"
             />
 
-            <label className="font-display font-700 text-xs uppercase tracking-wide text-amber-700 block mb-2">Passage text</label>
+            <label className="font-display font-700 text-xs uppercase tracking-wide text-teal-700 block mb-2">Passage text</label>
             <textarea
               value={makerText}
               onChange={(e) => setMakerText(e.target.value)}
               placeholder="Paste or write your passage here…"
               rows={6}
-              className="w-full bg-amber-50 rounded-2xl border-2 border-amber-300 px-4 py-3 font-body text-sm text-stone-700 focus:outline-none focus:border-amber-500"
+              className="w-full bg-teal-50 rounded-2xl border-2 border-teal-300 px-4 py-3 font-body text-sm text-stone-700 focus:outline-none focus:border-teal-500"
             />
             {(() => {
               const wc = makerText.trim() ? makerText.trim().split(/\s+/).length : 0;
@@ -1468,15 +1434,15 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
               );
             })()}
 
-            <div className="flex items-center gap-3 mb-4 bg-amber-50 rounded-2xl px-4 py-3" style={{ border: "2px solid #b45309" }}>
-              <p className="font-display font-800 text-2xl text-amber-800">{SESSION_WORD_COUNT}</p>
+            <div className="flex items-center gap-3 mb-4 bg-teal-50 rounded-2xl px-4 py-3" style={{ border: "2px solid #0d9488" }}>
+              <p className="font-display font-800 text-2xl text-teal-800">{SESSION_WORD_COUNT}</p>
               <div>
-                <p className="font-display font-700 text-xs uppercase tracking-wide text-amber-700">Target Words</p>
+                <p className="font-display font-700 text-xs uppercase tracking-wide text-teal-700">Target Words</p>
                 <p className="font-body text-[11px] text-stone-500">Fixed at {SESSION_WORD_COUNT} to keep each map's AI usage predictable</p>
               </div>
             </div>
 
-            <label className="font-display font-700 text-xs uppercase tracking-wide text-amber-700 block mb-1">Words to highlight (optional)</label>
+            <label className="font-display font-700 text-xs uppercase tracking-wide text-teal-700 block mb-1">Words to highlight (optional)</label>
             <p className="font-body text-[11px] text-stone-500 mb-2">Pick specific words yourself, or leave any box blank and the AI will choose good ones for you.</p>
             <div className="grid gap-2 mb-4" style={{ gridTemplateColumns: `repeat(${SESSION_WORD_COUNT}, minmax(0, 1fr))` }}>
               {makerWords.map((w, i) => (
@@ -1485,7 +1451,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                   value={w}
                   onChange={(e) => setMakerWords((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
                   placeholder={`Word ${i + 1}`}
-                  className="w-full bg-amber-50 rounded-xl border-2 border-amber-300 px-2 py-2 font-body text-xs sm:text-sm text-stone-700 text-center focus:outline-none focus:border-amber-500"
+                  className="w-full bg-teal-50 rounded-xl border-2 border-teal-300 px-2 py-2 font-body text-xs sm:text-sm text-stone-700 text-center focus:outline-none focus:border-teal-500"
                 />
               ))}
             </div>
@@ -1578,7 +1544,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
     return (
       <div className="max-w-md mx-auto px-6 py-8 step-in min-h-screen flex flex-col justify-center relative">
         <FloatingDecor density={5} />
-        <div className="bg-white p-8 step-in relative z-10 text-center" style={DECKLE}>
+        <div className="bg-white p-8 step-in relative z-10 text-center" style={CARD_GOLD}>
           <p className="text-4xl mb-3">🧑‍🎓</p>
           <h1 className="font-display font-800 text-xl text-stone-700 mb-2">Who's playing?</h1>
           <p className="font-body text-sm text-stone-500 mb-6">This lets your teacher check your progress over time, not just today.</p>
@@ -1624,7 +1590,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
     return (
       <div className="max-w-md mx-auto px-6 py-8 step-in min-h-screen flex flex-col justify-center relative">
         <FloatingDecor density={5} />
-        <div className="bg-white p-8 step-in relative z-10" style={DECKLE}>
+        <div className="bg-white p-8 step-in relative z-10" style={CARD_GOLD}>
           <p className="text-4xl text-center mb-3">🆕</p>
           <h1 className="font-display font-800 text-xl text-stone-700 text-center mb-1">New Student</h1>
           <p className="font-body text-sm text-stone-500 text-center mb-5">
@@ -1692,7 +1658,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
     return (
       <div className="max-w-md mx-auto px-6 py-8 step-in min-h-screen flex flex-col justify-center relative">
         <FloatingDecor density={5} />
-        <div className="bg-white p-8 step-in relative z-10" style={DECKLE}>
+        <div className="bg-white p-8 step-in relative z-10" style={CARD_GOLD}>
           <p className="text-4xl text-center mb-3">↩️</p>
           <h1 className="font-display font-800 text-xl text-stone-700 text-center mb-1">Returning Student</h1>
           <p className="font-body text-sm text-stone-500 text-center mb-5">Enter your full name and your 3 secret animals, in order.</p>
@@ -1748,8 +1714,8 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
         <div className="flex-1 min-h-0 flex flex-col justify-center">
 
       {step === 1 && (
-        <div className="bg-white p-6 sm:p-8 step-in relative z-10" style={KID_CARD}>
-          <div className="flex items-center gap-3 mb-5 bg-white rounded-2xl px-5 py-3" style={{ border: "2px solid #b45309" }}>
+        <div className="bg-white p-6 sm:p-8 step-in relative z-10" style={CARD_GOLD}>
+          <div className="flex items-center gap-3 mb-5 bg-white rounded-2xl px-5 py-3" style={{ border: "2px solid #f59e0b" }}>
             <span className="text-3xl">🐾</span>
             <div>
               <h1 className="font-display font-800 text-xl text-stone-700 leading-tight">Pick your animal companion</h1>
@@ -1773,7 +1739,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
           <h1 className="font-display font-800 text-xl text-stone-700 block mb-3 text-center bg-white/70 rounded-xl py-1.5">Build your explorer</h1>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-white p-4" style={KID_CARD}>
+            <div className="bg-white p-4" style={CARD_GOLD}>
               <div className="flex justify-center mb-3">
                 <AvatarDisplay config={avatarConfig} size={80} />
               </div>
@@ -1786,7 +1752,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                       key={h.id}
                       onClick={() => { SFX.tap(); setAvatarConfig((c) => ({ ...c, head: h.id })); }}
                       className={`w-11 h-11 rounded-full flex items-center justify-center text-xl border-3 transition-all ${
-                        avatarConfig.head === h.id ? "border-amber-600 scale-110 bg-amber-50" : "border-stone-200 opacity-70"
+                        avatarConfig.head === h.id ? "border-amber-500 scale-110 bg-amber-50" : "border-stone-200 opacity-70"
                       }`}
                       style={{ borderWidth: "3px" }}
                       title={h.label}
@@ -1807,7 +1773,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                         key={tone.id}
                         onClick={() => { SFX.tap(); setAvatarConfig((c) => ({ ...c, skinTone: tone.mod })); }}
                         className={`w-10 h-10 rounded-full flex items-center justify-center text-lg border-3 transition-all ${
-                          avatarConfig.skinTone === tone.mod ? "border-amber-600 scale-110 bg-amber-50" : "border-stone-200 opacity-70"
+                          avatarConfig.skinTone === tone.mod ? "border-amber-500 scale-110 bg-amber-50" : "border-stone-200 opacity-70"
                         }`}
                         style={{ borderWidth: "3px" }}
                         title={tone.label}
@@ -1820,7 +1786,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
               </div>
             </div>
 
-            <div className="bg-white p-4 sm:p-6 flex flex-col flex-1 justify-center" style={KID_CARD}>
+            <div className="bg-white p-4 sm:p-6 flex flex-col flex-1 justify-center" style={CARD_GOLD}>
               <p className="font-display font-700 text-sm uppercase tracking-wide text-amber-700 mb-4 sm:mb-6 text-center">Badge color</p>
               <div className="grid grid-cols-4 gap-3 sm:gap-6 justify-items-center">
                 {BADGE_COLORS.map((b) => (
@@ -1830,7 +1796,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                     className={`w-12 h-12 sm:w-16 sm:h-16 rounded-full transition-all active:scale-90 ${
                       avatarConfig.badge === b.id ? "scale-110" : "opacity-60 hover:opacity-100"
                     }`}
-                    style={{ background: b.gradient, border: avatarConfig.badge === b.id ? "4px solid #b45309" : "4px solid white", boxShadow: avatarConfig.badge === b.id ? "0 3px 0 0 #92400e" : "0 3px 0 0 rgba(120,53,15,0.25)" }}
+                    style={{ background: b.gradient, border: avatarConfig.badge === b.id ? "4px solid #f59e0b" : "4px solid white", boxShadow: avatarConfig.badge === b.id ? "0 2px 8px rgba(0,0,0,0.18)" : "0 1px 3px rgba(0,0,0,0.08)" }}
                     title={b.label}
                   />
                 ))}
@@ -1838,7 +1804,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
               <p className="font-hand text-xl text-stone-500 text-center mt-6">{BADGE_COLORS.find((b) => b.id === avatarConfig.badge)?.label}</p>
             </div>
 
-            <div className="bg-white p-4 sm:p-6 flex flex-col flex-1 justify-center" style={KID_CARD}>
+            <div className="bg-white p-4 sm:p-6 flex flex-col flex-1 justify-center" style={CARD_GOLD}>
               <p className="font-display font-700 text-sm uppercase tracking-wide text-amber-700 mb-4 sm:mb-6 text-center">Gear</p>
               <div className="grid grid-cols-4 gap-3 sm:gap-6 justify-items-center">
                 {ACCESSORY_STICKERS.map((a) => (
@@ -1846,9 +1812,9 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                     key={a.id}
                     onClick={() => { SFX.tap(); setAvatarConfig((c) => ({ ...c, accessory: a.id })); }}
                     className={`w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-white flex items-center justify-center text-2xl sm:text-3xl transition-all active:scale-90 ${
-                      avatarConfig.accessory === a.id ? "border-amber-600 scale-110 bg-amber-50" : "border-stone-200 opacity-60 hover:opacity-100"
+                      avatarConfig.accessory === a.id ? "border-amber-500 scale-110 bg-amber-50" : "border-stone-200 opacity-60 hover:opacity-100"
                     }`}
-                    style={{ borderWidth: "4px", boxShadow: avatarConfig.accessory === a.id ? "0 3px 0 0 #b45309" : "0 3px 0 0 #e7e5e4" }}
+                    style={{ borderWidth: "4px", boxShadow: avatarConfig.accessory === a.id ? "0 2px 8px rgba(0,0,0,0.18)" : "0 1px 3px rgba(0,0,0,0.08)" }}
                     title={a.label}
                   >
                     {a.emoji || "🚫"}
@@ -1871,8 +1837,8 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
       )}
 
       {step === 3 && (
-        <div className="bg-white p-6 sm:p-8 step-in relative z-10 max-h-full overflow-y-auto" style={KID_CARD}>
-          <div className="flex items-center gap-3 mb-5 bg-white rounded-2xl px-5 py-3" style={{ border: "2px solid #b45309" }}>
+        <div className="bg-white p-6 sm:p-8 step-in relative z-10 max-h-full overflow-y-auto" style={CARD_GOLD}>
+          <div className="flex items-center gap-3 mb-5 bg-white rounded-2xl px-5 py-3" style={{ border: "2px solid #f59e0b" }}>
             <span className="text-3xl">🗺️</span>
             <div>
               <h1 className="font-display font-800 text-xl text-stone-700 leading-tight">Choose your map</h1>
@@ -1909,7 +1875,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
           </div>
 
           {passageId && allPassages[passageId] && (
-            <div className="flex items-center gap-3 mt-4 bg-amber-50 rounded-2xl px-4 py-3 step-in" style={{ border: "2px solid #b45309" }}>
+            <div className="flex items-center gap-3 mt-4 bg-amber-50 rounded-2xl px-4 py-3 step-in" style={{ border: "2px solid #f59e0b" }}>
               <p className="font-display font-800 text-2xl text-amber-800">{SESSION_WORD_COUNT}</p>
               <div>
                 <p className="font-display font-700 text-sm uppercase tracking-wide text-amber-700">Words Today</p>
@@ -2004,10 +1970,10 @@ function ProgressTrail({ words, solvedWords, avatarConfig, totalMilestone }) {
   const solvedCount = solvedWords.length;
   const points = computeTrailPoints(words.length);
   const pathD = trailPath(points);
-  const stoneColors = ["#16a34a", "#0e7490", "#b45309", "#c2410c", "#be185d"];
+  const stoneColors = ["#16a34a", "#0e7490", "#f59e0b", "#c2410c", "#be185d"];
 
   return (
-    <div className="mb-6 bg-white p-5" style={DECKLE}>
+    <div className="mb-6 bg-white p-5" style={CARD_GOLD}>
       <div className="flex items-center justify-between mb-2">
         <p className="font-display font-800 text-sm text-amber-800 flex items-center gap-1">
           <Footprints className="w-4 h-4" /> The Trail
@@ -2039,7 +2005,7 @@ function ProgressTrail({ words, solvedWords, avatarConfig, totalMilestone }) {
         <div className="flex items-center justify-center gap-2 mt-2 step-in bounce-in">
           <span
             className="w-10 h-10 rounded-full bg-white flex items-center justify-center text-xl shrink-0"
-            style={{ border: "3px solid #f59e0b", boxShadow: "0 3px 0 0 #b45309" }}
+            style={{ border: "2px solid #e7e5e4", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
           >
             {totalMilestone.emoji}
           </span>
@@ -2238,7 +2204,7 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, onSwit
         </div>
       )}
 
-      <div className="bg-white p-6" style={{ ...DECKLE, borderColor: theme.border }}>
+      <div className="bg-white p-6" style={{ ...CARD_GOLD, borderColor: theme.border }}>
         <h1 className="font-display text-2xl font-800 mb-4 flex items-center gap-2" style={{ color: theme.text }}>
           <span className="text-3xl">{passage.emoji}</span> {passage.title}
         </h1>
@@ -2249,7 +2215,7 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, onSwit
       </p>
 
       {solvedWords.length === passage.words.length && (
-        <div className="mt-8 p-6 text-center step-in bounce-in" style={{ ...DECKLE, background: "linear-gradient(135deg,#fef3c7,#fed7aa)" }}>
+        <div className="mt-8 p-6 text-center step-in bounce-in" style={{ ...CARD_GOLD, background: "linear-gradient(135deg,#fef3c7,#fed7aa)" }}>
           <Trophy className="w-10 h-10 mx-auto mb-2 text-orange-500" />
           <p className="font-display text-2xl font-800 text-stone-700">Adventure complete! 🎉</p>
           {passage.arrival && <p className="font-hand text-xl text-amber-700 mt-2">{passage.arrival}</p>}
@@ -2416,7 +2382,7 @@ function SoundToggle({ soundOn, onToggle }) {
     <button
       onClick={onToggle}
       className="fixed top-4 right-4 z-50 w-11 h-11 rounded-full bg-white flex items-center justify-center text-lg"
-      style={{ border: "3px solid #b45309", boxShadow: "0 3px 0 0 #92400e" }}
+      style={{ border: "2px solid #e7e5e4", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
       title={soundOn ? "Mute sound" : "Unmute sound"}
       aria-label={soundOn ? "Mute sound" : "Unmute sound"}
     >
@@ -2430,7 +2396,7 @@ function CloseButton({ onClick }) {
     <button
       onClick={onClick}
       className="fixed top-4 left-4 z-50 w-11 h-11 rounded-full bg-white flex items-center justify-center text-lg text-stone-500"
-      style={{ border: "3px solid #b45309", boxShadow: "0 3px 0 0 #92400e" }}
+      style={{ border: "2px solid #e7e5e4", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
       title="Close G.I.S.T."
       aria-label="Close G.I.S.T."
     >
@@ -2457,7 +2423,7 @@ function CloseConfirmModal({ onCancel, onConfirm, screen, studentId }) {
         aria-modal="true"
         aria-labelledby="close-confirm-heading"
         className="relative bg-white p-6 sm:p-8 text-center max-w-sm w-full step-in"
-        style={{ borderRadius: "32px", border: "3px solid #b45309", boxShadow: "0 6px 0 0 #92400e" }}
+        style={CARD_NEUTRAL}
       >
         <p className="text-4xl mb-3">🧭</p>
         <p id="close-confirm-heading" className="font-display font-800 text-xl text-stone-700 mb-2">Are you sure you want to close G.I.S.T.?</p>
@@ -2601,7 +2567,7 @@ function WordBankWidget({ tiles, onSubmit }) {
               className={`w-11 h-11 rounded-lg font-display font-800 text-xl uppercase transition-all hover:scale-105 ${
                 isUsed ? "bg-teal-100 text-teal-700 scale-90" : "bg-amber-100 text-stone-800"
               }`}
-              style={{ border: `3px solid ${isUsed ? "#0d9488" : "#b45309"}` }}
+              style={{ border: `3px solid ${isUsed ? "#0d9488" : "#f59e0b"}` }}
             >
               {letter}
             </button>
@@ -2694,7 +2660,7 @@ function LetterConnectWidget({ tiles, onSubmit }) {
                 left: pos.x,
                 top: pos.y,
                 transform: "translate(-50%, -50%)",
-                border: `3px solid ${isUsed ? "#0d9488" : "#b45309"}`,
+                border: `3px solid ${isUsed ? "#0d9488" : "#f59e0b"}`,
                 zIndex: 2,
               }}
             >
@@ -3153,7 +3119,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
     <div className="flex flex-col overflow-hidden" style={{ height: "100dvh" }}>
       <div className="max-w-4xl mx-auto w-full px-5 pt-6 pb-3 flex-1 flex flex-col min-h-0 step-in">
         {/* Header card */}
-        <div className="relative bg-white p-3 pl-14 mb-3 shrink-0" style={{ ...DECKLE, borderColor: mapTheme.border }}>
+        <div className="relative bg-white p-3 pl-14 mb-3 shrink-0" style={{ ...CARD_GOLD, borderColor: mapTheme.border }}>
           {wordDone && <Sparkle count={10} />}
           <div
             className="absolute -top-3 -left-3 z-20 bg-white rounded-2xl p-1"
@@ -3180,7 +3146,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
               <button
                 onClick={() => { SFX.tap(); setShowSettings((s) => !s); }}
                 className="w-10 h-10 rounded-full bg-white flex items-center justify-center text-lg"
-                style={{ border: "3px solid #b45309", boxShadow: "0 3px 0 0 #92400e" }}
+                style={{ border: "2px solid #e7e5e4", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
                 title="Settings"
                 aria-label="Settings"
               >
@@ -3189,7 +3155,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
               <button
                 onClick={onBack}
                 className="flex items-center gap-1 font-display font-700 text-sm text-stone-600 bg-white rounded-full px-3 py-2.5"
-                style={{ border: "3px solid #b45309", boxShadow: "0 3px 0 0 #92400e" }}
+                style={{ border: "2px solid #e7e5e4", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
               >
                 <ChevronLeft className="w-4 h-4" /> Back
               </button>
@@ -3197,13 +3163,13 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
               {showSettings && (
                 <div
                   className="absolute top-12 right-0 z-30 bg-white rounded-2xl p-4 step-in"
-                  style={{ border: "3px solid #b45309", boxShadow: "0 4px 0 0 #92400e", minWidth: "200px" }}
+                  style={{ border: "2px solid #e7e5e4", boxShadow: CARD_SHADOW, minWidth: "200px" }}
                 >
                   <p className="font-display font-800 text-sm text-stone-600 mb-3">⚙️ Settings</p>
                   <button
                     onClick={() => onToggleSound(!soundOn)}
                     className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-amber-50"
-                    style={{ border: "2px solid #b45309" }}
+                    style={{ border: "2px solid #f59e0b" }}
                   >
                     <span className="font-body font-700 text-sm text-stone-700">Sound</span>
                     <span className="text-xl">{soundOn ? "🔊 On" : "🔇 Off"}</span>
@@ -3228,7 +3194,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
         <div
           ref={scrollRef}
           className="flex-1 overflow-y-auto bg-white p-5 sm:p-7 space-y-3"
-          style={{ ...DECKLE, maxHeight: "calc(100dvh - 225px)" }}
+          style={{ ...CARD_GOLD, maxHeight: "calc(100dvh - 225px)" }}
         >
           {prePhase === "prior" && (
             <div className="text-center py-4 step-in">
@@ -3426,7 +3392,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
                       key={i}
                       onClick={() => submitAnswer(word)}
                       className="px-4 py-2.5 bg-white rounded-full font-display font-700 text-lg sm:text-xl text-stone-700 transition-all hover:scale-110"
-                      style={{ border: current.input_type === "reverse_clue" ? "3px solid #0d9488" : "3px solid #b45309", boxShadow: current.input_type === "reverse_clue" ? "0 3px 0 0 #0f766e" : "0 3px 0 0 #92400e" }}
+                      style={{ border: current.input_type === "reverse_clue" ? "3px solid #0d9488" : "3px solid #f59e0b", boxShadow: current.input_type === "reverse_clue" ? "0 3px 0 0 #0f766e" : "0 3px 0 0 #c2410c" }}
                     >
                       {word}
                     </button>
@@ -3576,7 +3542,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
               onClick={() => { SFX.tap(); setActiveSlide((s) => Math.max(0, s - 1)); }}
               disabled={activeSlide === 0}
               className="w-9 h-9 rounded-full bg-white flex items-center justify-center disabled:opacity-30"
-              style={{ border: "3px solid #b45309", boxShadow: "0 3px 0 0 #92400e" }}
+              style={{ border: "2px solid #e7e5e4", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
               aria-label="Previous card"
             >
               <ChevronLeft className="w-4 h-4" />
@@ -3588,7 +3554,7 @@ function CoachScreen({ passage, targetWord, avatarConfig, onWordResolved, onBack
               onClick={() => { SFX.tap(); setActiveSlide((s) => Math.min(slideGroups.length - 1, s + 1)); }}
               disabled={isLatestSlide}
               className="w-9 h-9 rounded-full bg-white flex items-center justify-center disabled:opacity-30"
-              style={{ border: "3px solid #b45309", boxShadow: "0 3px 0 0 #92400e" }}
+              style={{ border: "2px solid #e7e5e4", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
               aria-label="Next card"
             >
               <ArrowRight className="w-4 h-4" />
@@ -3832,10 +3798,10 @@ function ComprehensionScreen({ passage, avatarConfig, onDone }) {
     <div className="flex flex-col overflow-hidden" style={{ height: "100dvh" }}>
       <div className="max-w-3xl mx-auto w-full px-5 pt-6 pb-3 flex-1 flex flex-col min-h-0 step-in">
         {/* Header card, matching CoachScreen's identity */}
-        <div className="relative bg-white p-3 pl-14 mb-3 shrink-0" style={DECKLE}>
+        <div className="relative bg-white p-3 pl-14 mb-3 shrink-0" style={CARD_GOLD}>
           <div
             className="absolute -top-3 -left-3 z-20 bg-white rounded-2xl p-1"
-            style={{ border: "3px solid #b45309", boxShadow: "0 3px 0 0 #92400e" }}
+            style={{ border: "2px solid #e7e5e4", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
           >
             <AvatarDisplay config={avatarConfig} size={44} />
           </div>
@@ -3846,7 +3812,7 @@ function ComprehensionScreen({ passage, avatarConfig, onDone }) {
         {/* Single unified box, matching CoachScreen */}
         <div
           className="flex-1 overflow-y-auto bg-white p-5 sm:p-7 space-y-4"
-          style={{ ...DECKLE, maxHeight: "calc(100dvh - 145px)" }}
+          style={{ ...CARD_GOLD, maxHeight: "calc(100dvh - 145px)" }}
         >
           {loading && (
             <div className="flex justify-start items-end gap-1.5 step-in">
@@ -3947,7 +3913,7 @@ function RecapScreen({ studentId, log, avatarConfig, comprehensionResult, onFini
     <div className="max-w-2xl mx-auto px-6 py-10 step-in relative min-h-screen flex flex-col justify-center">
       <FloatingDecor density={6} />
       <Confetti />
-      <div className="bg-white p-6 sm:p-8 relative z-10 text-center" style={DECKLE}>
+      <div className="bg-white p-6 sm:p-8 relative z-10 text-center" style={CARD_GOLD}>
         <div className="flex items-center justify-center gap-3 mb-2">
           <AvatarDisplay config={avatarConfig} size={64} />
           <span className="text-5xl">{companionEmoji}</span>
@@ -4329,7 +4295,7 @@ function TourScreen({ avatarConfig, passage, onDone, bilingual, onToggleBilingua
   return (
     <div className="max-w-2xl mx-auto px-6 py-10 step-in relative min-h-screen flex flex-col justify-center">
       <FloatingDecor density={5} />
-      <div className="bg-white p-6 sm:p-8 relative z-10 text-center max-h-[92dvh] overflow-y-auto" style={DECKLE}>
+      <div className="bg-white p-6 sm:p-8 relative z-10 text-center max-h-[92dvh] overflow-y-auto" style={CARD_GOLD}>
         <button
           onClick={onDone}
           className="absolute top-3 right-3 sm:top-4 sm:right-4 z-20 flex items-center gap-1 px-3 py-1.5 rounded-full bg-white font-display font-700 text-xs text-stone-500 hover:text-stone-700 hover:border-stone-400 transition-all"
@@ -4342,7 +4308,7 @@ function TourScreen({ avatarConfig, passage, onDone, bilingual, onToggleBilingua
           <button
             onClick={onToggleBilingual}
             className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20 flex items-center rounded-full bg-white overflow-hidden font-display font-800 text-xs"
-            style={{ border: "3px solid #b45309", boxShadow: "0 3px 0 0 #92400e" }}
+            style={{ border: "2px solid #e7e5e4", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
             title={bilingual ? "Turn off Bahasa Malaysia support" : "Turn on Bahasa Malaysia support"}
           >
             <span className={`px-2.5 py-1.5 ${!bilingual ? "bg-amber-400 text-amber-900" : "text-stone-500"}`}>EN</span>
@@ -4735,7 +4701,7 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
 // plain sections rather than a paginated flow.
 function TeacherGuideScreen({ onBack }) {
   const Section = ({ icon, title, children }) => (
-    <div className="bg-white p-5 mb-4 rounded-3xl relative z-10" style={DECKLE}>
+    <div className="bg-white p-5 mb-4 rounded-3xl relative z-10" style={CARD_TEAL}>
       <h2 className="font-display font-800 text-lg text-stone-700 mb-2 flex items-center gap-2">
         <span className="text-2xl">{icon}</span> {title}
       </h2>
@@ -4858,7 +4824,7 @@ function FileBoxScreen({ onBack }) {
     return (
       <div className="max-w-2xl mx-auto px-6 py-8 step-in min-h-screen flex flex-col justify-center relative">
         <FloatingDecor density={4} />
-        <div className="bg-white p-8 step-in relative z-10 text-center" style={DECKLE}>
+        <div className="bg-white p-8 step-in relative z-10 text-center" style={CARD_TEAL}>
           {detailLoading ? (
             <p className="font-hand text-xl text-stone-500">Loading this session…</p>
           ) : (
@@ -4981,10 +4947,10 @@ function AccessGateScreen({ onUnlocked }) {
     <div className="max-w-md mx-auto px-6 py-8 step-in min-h-screen flex flex-col justify-center relative">
       <FloatingDecor density={5} />
       <div className="text-center mb-4 relative z-10">
-        <div className="flex justify-center mb-1"><CompassRose size={84} /></div>
-        <h1 className="font-display text-6xl font-800 sticker-title mb-1">G.I.S.T.</h1>
+        <div className="flex justify-center mb-1"><CompassRose size={84} tone="teal" /></div>
+        <h1 className="font-display text-6xl font-800 sticker-title-teal mb-1">G.I.S.T.</h1>
       </div>
-      <div className="relative z-10 bg-white p-8" style={DECKLE}>
+      <div className="relative z-10 bg-white p-8" style={CARD_TEAL}>
         <p className="font-display font-800 text-sm uppercase tracking-wide text-stone-600 mb-2 text-center">Access Code</p>
         <p className="font-body text-sm text-stone-700 leading-relaxed mb-5 text-center">
           Ask your teacher or school for the code to unlock G.I.S.T.
@@ -4997,7 +4963,7 @@ function AccessGateScreen({ onUnlocked }) {
           autoComplete="off"
           spellCheck={false}
           autoFocus
-          className="w-full bg-amber-50 rounded-2xl border-2 border-amber-300 px-4 py-4 font-body text-xl text-stone-700 text-center focus:outline-none focus:border-amber-500 placeholder:text-stone-500"
+          className="w-full bg-teal-50 rounded-2xl border-2 border-teal-300 px-4 py-4 font-body text-xl text-stone-700 text-center focus:outline-none focus:border-teal-500 placeholder:text-stone-500"
         />
         {error && <p className="font-body text-xs text-red-600 text-center mt-3" aria-live="polite">{error}</p>}
         <div className="flex justify-center mt-6">
@@ -5139,10 +5105,8 @@ export default function App() {
 
   if (!authInfo) {
     return (
-      <div className="min-h-screen text-stone-700" style={{ fontFamily: "ui-sans-serif, system-ui", background: "linear-gradient(180deg,#FFF6DE 0%,#FFE9AD 55%,#FFDD85 100%)" }}>
+      <div className="min-h-screen text-stone-700" style={{ fontFamily: "ui-sans-serif, system-ui", background: "#FAFAF9" }}>
         <FontImport />
-        <PaperGrain />
-        <ScreenFrame />
         <main>
           <AccessGateScreen
             onUnlocked={(token, expiresAt) => {
@@ -5157,10 +5121,8 @@ export default function App() {
 
   if (appClosed) {
     return (
-      <div className="min-h-screen text-stone-700" style={{ fontFamily: "ui-sans-serif, system-ui", background: "linear-gradient(180deg,#FFF6DE 0%,#FFE9AD 55%,#FFDD85 100%)" }}>
+      <div className="min-h-screen text-stone-700" style={{ fontFamily: "ui-sans-serif, system-ui", background: "#FAFAF9" }}>
         <FontImport />
-        <PaperGrain />
-        <ScreenFrame />
         <main>
           <ClosedScreen />
         </main>
@@ -5169,11 +5131,8 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen text-stone-700" style={{ fontFamily: "ui-sans-serif, system-ui", background: "linear-gradient(180deg,#FFF6DE 0%,#FFE9AD 55%,#FFDD85 100%)" }}>
+    <div className="min-h-screen text-stone-700" style={{ fontFamily: "ui-sans-serif, system-ui", background: "#FAFAF9" }}>
       <FontImport />
-      <PaperGrain />
-      <CompassWatermark />
-      <ScreenFrame />
       <CloseButton onClick={() => setShowCloseConfirm(true)} />
       {showCloseConfirm && (
         <CloseConfirmModal
