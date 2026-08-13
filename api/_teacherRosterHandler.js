@@ -116,7 +116,9 @@ export default async function teacherRosterHandler(req, res) {
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
   const claims = verifyToken(token, secret);
   if (!claims || claims.kind === "student") {
-    return res.status(401).json({ error: "Missing or expired access token" });
+    // See the matching comment in _studentAuthHandler.js — tokenInvalid is
+    // what the client's re-auth-overlay logic actually keys off of.
+    return res.status(401).json({ error: "Missing or expired access token", tokenInvalid: true });
   }
 
   const supabase = getSupabase();

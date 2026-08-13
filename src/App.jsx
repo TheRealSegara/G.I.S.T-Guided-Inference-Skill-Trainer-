@@ -915,15 +915,23 @@ async function apiRequest(path, { method = "GET", body, token } = {}) {
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
-  // Only the teacher access-code token expiring should trigger the "class
-  // session timed out" re-auth overlay (see onAuthInvalidated in App) —
-  // callClaude already does this for AI calls, but File Box/session/roster
-  // calls through this helper were missing it, silently showing a generic
-  // "couldn't load" error with no way back in. A student token's own 401
-  // (a login/signup credential mismatch, or a rare student-session expiry)
-  // is a completely different, expected situation and must NOT trigger it.
-  if (response.status === 401 && token && token === currentAuthToken) onAuthInvalidated?.();
   const data = await response.json().catch(() => ({}));
+  // Only the teacher access-code token actually being invalid/expired
+  // should trigger the "class session timed out" re-auth overlay (see
+  // onAuthInvalidated in App) — callClaude already does this for AI
+  // calls, but File Box/session/roster calls through this helper were
+  // missing it, silently showing a generic "couldn't load" error with no
+  // way back in. The tricky part: /api/student-auth returns a 401 for
+  // TWO different reasons (the caller's own teacher token being bad, or a
+  // student simply mistyping their name/secret animals), and both cases
+  // send the exact same teacher token — student signup/login has no
+  // student token yet to distinguish them by. Comparing token identity
+  // alone can't tell these apart (it's the same token either way), so
+  // this relies on the server's own explicit `tokenInvalid` flag (see the
+  // matching comment in api/_studentAuthHandler.js) instead of guessing
+  // from status code + token identity — a student's wrong-secret 401
+  // never sets that flag, so it correctly never pops this overlay.
+  if (response.status === 401 && data?.tokenInvalid && token && token === currentAuthToken) onAuthInvalidated?.();
   if (!response.ok) {
     const err = new Error(data?.error || "Request failed");
     err.status = response.status;

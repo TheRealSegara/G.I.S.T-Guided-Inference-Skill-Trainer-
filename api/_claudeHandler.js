@@ -211,7 +211,12 @@ export default async function claudeHandler(req, res) {
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
   const claims = verifyToken(token, process.env.AUTH_SECRET);
   if (!claims) {
-    return res.status(401).json({ error: "Missing or expired access token" });
+    // See the matching comment in _studentAuthHandler.js — tokenInvalid is
+    // what the client's re-auth-overlay logic keys off of (callClaude
+    // itself just checks response.status === 401, since this is the only
+    // 401 this particular endpoint ever returns, but the field is added
+    // here too for consistency across every handler).
+    return res.status(401).json({ error: "Missing or expired access token", tokenInvalid: true });
   }
 
   // Validate the body before spending quota, so a malformed request (or a

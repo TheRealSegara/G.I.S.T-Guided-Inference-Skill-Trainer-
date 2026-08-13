@@ -320,7 +320,9 @@ export default async function sessionHandler(req, res) {
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
   const claims = verifyToken(token, secret);
   if (!claims) {
-    return res.status(401).json({ error: "Missing or expired access token" });
+    // See the matching comment in _studentAuthHandler.js — tokenInvalid is
+    // what the client's re-auth-overlay logic actually keys off of.
+    return res.status(401).json({ error: "Missing or expired access token", tokenInvalid: true });
   }
 
   if (req.method === "POST") return handleSave(req, res, claims);

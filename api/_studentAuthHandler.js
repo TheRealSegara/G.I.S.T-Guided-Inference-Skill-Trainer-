@@ -110,7 +110,16 @@ export default async function studentAuthHandler(req, res) {
   const teacherToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
   const claims = verifyToken(teacherToken, secret);
   if (!claims || claims.kind === "student") {
-    return res.status(401).json({ error: "Missing or expired access token" });
+    // tokenInvalid distinguishes this from the OTHER 401 this same endpoint
+    // returns below (wrong student name/secret animals, line ~199) — both
+    // are 401s, but only this one means the caller's own bearer token is
+    // actually bad. The client (App.jsx's apiRequest) relies on this flag
+    // to decide whether to show "your class session expired, re-enter the
+    // code" — it must never fire on a student simply mistyping their
+    // secret, which would otherwise look identical (401, teacher token
+    // in both cases, since student signup/login always authenticates with
+    // the teacher token, not a student token — there isn't one yet).
+    return res.status(401).json({ error: "Missing or expired access token", tokenInvalid: true });
   }
 
   const supabase = getSupabase();
