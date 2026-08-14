@@ -241,7 +241,16 @@ export default async function claudeHandler(req, res) {
     // Unlike the daily-quota 429 below, this clears itself within
     // RATE_LIMIT_WINDOW_MS (60s) — worth the client auto-retrying rather
     // than making a student/teacher notice and click Retry manually.
-    return res.status(429).json({ error: "Too many requests, please slow down", retryable: true });
+    // retryAfterMs here is however long is actually left in THIS ip's
+    // window (isRateLimited just updated requestLog above), not the full
+    // 60s — a classroom sharing one IP can trip this mid-window, and
+    // without a real number the client would otherwise fall back to its
+    // own fixed 20s guess, which can undershoot and dead-end the retry
+    // exactly like the Groq-upstream 429 case this same mechanism exists
+    // to fix (see retryAfterMs handling further down).
+    const entry = requestLog.get(ip);
+    const retryAfterMs = entry ? Math.max(0, entry.windowStart + RATE_LIMIT_WINDOW_MS - Date.now()) : RATE_LIMIT_WINDOW_MS;
+    return res.status(429).json({ error: "Too many requests, please slow down", retryable: true, retryAfterMs });
   }
 
   const authHeader = req.headers["authorization"] || "";

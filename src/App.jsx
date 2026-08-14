@@ -2832,7 +2832,10 @@ function ConfirmDeleteModal({ heading, message, confirmLabel = "Yes, delete", on
 
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (e.key === "Escape") { onCancel(); return; }
+      // Guard against closing (and unmounting this component) while a
+      // delete is still in flight — see the matching guard on the
+      // backdrop's onClick below for why.
+      if (e.key === "Escape") { if (!loading) onCancel(); return; }
       if (e.key !== "Tab") return;
       if (e.shiftKey && document.activeElement === cancelRef.current) {
         e.preventDefault();
@@ -2844,7 +2847,7 @@ function ConfirmDeleteModal({ heading, message, confirmLabel = "Yes, delete", on
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onCancel]);
+  }, [onCancel, loading]);
 
   async function handleConfirm() {
     if (loading) return;
@@ -2859,13 +2862,22 @@ function ConfirmDeleteModal({ heading, message, confirmLabel = "Yes, delete", on
     }
   }
 
+  // The Cancel button already disables itself while loading; the backdrop
+  // needs the same guard so a stray click mid-delete can't unmount this
+  // modal out from under its own pending onConfirm() — otherwise the
+  // eventual result (including an error, which this modal is the only
+  // place that shows it) never reaches the teacher.
+  function handleBackdropClick() {
+    if (!loading) onCancel();
+  }
+
   // Portal straight to document.body — same reasoning as ResetSecretModal
   // above: this is opened from inside FileBoxScreen's "step-in"-classed
   // root div, whose entrance-animation transform would otherwise trap
   // "fixed inset-0" to that div's own bounds instead of the real viewport.
   return createPortal(
     <div className="fixed inset-0 flex items-center justify-center p-6" style={{ zIndex: 1000 }}>
-      <div className="absolute inset-0" style={{ background: "rgba(41,37,36,0.55)", backdropFilter: "blur(4px)" }} onClick={onCancel} aria-hidden="true" />
+      <div className="absolute inset-0" style={{ background: "rgba(41,37,36,0.55)", backdropFilter: "blur(4px)" }} onClick={handleBackdropClick} aria-hidden="true" />
       <div
         role="dialog"
         aria-modal="true"
