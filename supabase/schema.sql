@@ -72,6 +72,12 @@ create table if not exists session_words (
   clue_identified text,
   transfer_passed boolean,
   time_to_answer_sec int,
+  -- Total pacing-gate hold (both phases, summed across every exchange)
+  -- actually enforced on this word, in seconds. Compared against
+  -- time_to_answer_sec by the diagnostic engine to flag an answer that
+  -- landed right at the enforced floor (essentially a guess-speed click)
+  -- — see gateMsAccumRef/answeredAtGateFloor in src/App.jsx.
+  min_gate_sec int,
   fun_fact text,
   solved_at timestamptz not null default now()
 );
@@ -80,6 +86,7 @@ create table if not exists session_words (
 -- re-run against a fresh database too (the column is already present from
 -- the create table above in that case, so this is a no-op there).
 alter table session_words add column if not exists skip_reason text;
+alter table session_words add column if not exists min_gate_sec int;
 
 create index if not exists session_words_session_id_idx on session_words (session_id);
 

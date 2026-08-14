@@ -20,7 +20,7 @@ const MAX_STRING = 500;
 const SAVE_ALLOWED_KEYS = ["passageTitle", "passageEmoji", "startedAt", "finishedAt", "comprehensionResult", "log"];
 const LOG_ENTRY_ALLOWED_KEYS = [
   "word", "clueType", "concreteness", "finalStage", "hintsUsed", "skipped", "skipReason", "revealedMeaning",
-  "priorKnowledge", "gotItVia", "clueIdentified", "transferPassed", "timeToAnswerSec", "solvedAt", "passageTitle", "funFact",
+  "priorKnowledge", "gotItVia", "clueIdentified", "transferPassed", "timeToAnswerSec", "minGateSec", "solvedAt", "passageTitle", "funFact",
 ];
 const PATCH_ALLOWED_KEYS = ["sessionId", "diagnosticReport"];
 
@@ -107,6 +107,7 @@ function validateLogEntry(entry) {
   if (!isValidOptionalString(entry.clueIdentified, MAX_CLUE_PHRASE)) return false;
   if (!isValidOptionalBoolean(entry.transferPassed)) return false;
   if (!isValidOptionalNumber(entry.timeToAnswerSec)) return false;
+  if (!isValidOptionalNumber(entry.minGateSec)) return false;
   if (!isValidOptionalString(entry.passageTitle, 200)) return false;
   if (!isValidOptionalString(entry.funFact, MAX_FREE_TEXT)) return false;
   return true;
@@ -170,6 +171,7 @@ async function handleSave(req, res, claims) {
     clue_identified: entry.clueIdentified || null,
     transfer_passed: entry.transferPassed === undefined ? null : entry.transferPassed,
     time_to_answer_sec: entry.timeToAnswerSec === undefined ? null : entry.timeToAnswerSec,
+    min_gate_sec: entry.minGateSec === undefined ? null : entry.minGateSec,
     fun_fact: entry.funFact || null,
     solved_at: new Date(entry.solvedAt).toISOString(),
   }));
@@ -217,7 +219,7 @@ async function handleFetch(req, res, claims) {
 
   const { data: words, error: wordsError } = await supabase
     .from("session_words")
-    .select("word, clue_type, concreteness, final_stage, hints_used, skipped, skip_reason, revealed_meaning, prior_knowledge, got_it_via, clue_identified, transfer_passed, time_to_answer_sec, fun_fact, solved_at")
+    .select("word, clue_type, concreteness, final_stage, hints_used, skipped, skip_reason, revealed_meaning, prior_knowledge, got_it_via, clue_identified, transfer_passed, time_to_answer_sec, min_gate_sec, fun_fact, solved_at")
     .eq("session_id", sessionId)
     .order("solved_at", { ascending: true });
   if (wordsError) {
@@ -251,6 +253,7 @@ async function handleFetch(req, res, claims) {
       clueIdentified: w.clue_identified,
       transferPassed: w.transfer_passed,
       timeToAnswerSec: w.time_to_answer_sec,
+      minGateSec: w.min_gate_sec,
       funFact: w.fun_fact,
       solvedAt: new Date(w.solved_at).getTime(),
     })),
