@@ -5243,6 +5243,7 @@ function TeacherGuideScreen({ onBack }) {
 
       <Section icon="🗃️" title="The File Box">
         <p>Every student who's signed up under your access code shows up here, with their full session history — reachable any time from the main menu, not just right after a student finishes playing. Open a student to see their past sessions, and open a session to see its full report again.</p>
+        <p>Two small icons sit next to each student: <b>🔑 Reset secret</b> lets you set new secret animals with a student right there if they've forgotten theirs, no need to know the old ones. <b>🗑️ Delete</b> permanently removes that student and every one of their sessions — useful for clearing out a test account or a duplicate signup. The same 🗑️ delete also appears next to each individual session, for removing just one session without touching the rest of a student's history. Both deletes ask you to confirm first, and neither can be undone once confirmed, so use them deliberately.</p>
       </Section>
     </div>
   );
