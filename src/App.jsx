@@ -30,10 +30,6 @@ const FontImport = () => (
       100% { transform: translateY(110vh) rotate(var(--rot, 360deg)); opacity: 0.9; }
     }
     .confetti-piece { animation-name: confettiFall; animation-timing-function: ease-in; animation-fill-mode: forwards; }
-    @keyframes companionBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
-    .companion-bob { animation: companionBob 2.4s ease-in-out infinite; }
-    @keyframes companionGlow { 0%, 100% { box-shadow: 0 0 0 0 rgba(251,191,36,0.6); } 50% { box-shadow: 0 0 0 10px rgba(251,191,36,0); } }
-    .companion-speaking { animation: companionGlow 1s ease-out infinite; }
     @keyframes sparklePop {
       0% { transform: translate(0,0) scale(0.3); opacity: 0; }
       30% { opacity: 1; }
@@ -53,7 +49,7 @@ const FontImport = () => (
     }
     @media (prefers-reduced-motion: reduce) {
       .step-in, .bounce-in, .float-slow, .float-med, .wiggle, .spin-slow,
-      .confetti-piece, .companion-bob, .companion-speaking, .sparkle-piece,
+      .confetti-piece, .sparkle-piece,
       .animate-pulse, .animate-bounce {
         animation: none !important;
       }
@@ -175,24 +171,6 @@ function Confetti({ count = 40 }) {
           }}
         />
       ))}
-    </div>
-  );
-}
-
-function PersistentCompanion({ avatarConfig, size = "text-6xl" }) {
-  const companionEmoji = ANIMAL_COMPANIONS.find((c) => c.id === avatarConfig.companion)?.emoji || "🦜";
-  const speaking = useIsSpeaking();
-  return (
-    <div
-      className="fixed bottom-4 left-4 z-0 companion-bob pointer-events-none select-none"
-      aria-hidden="true"
-    >
-      <span
-        className={`${size} inline-block rounded-full bg-white ${speaking ? "companion-speaking" : ""}`}
-        style={{ border: "2px solid #e7e5e4", boxShadow: "0 1px 3px rgba(0,0,0,0.1)", padding: "0.15em 0.2em", lineHeight: 1 }}
-      >
-        {companionEmoji}
-      </span>
     </div>
   );
 }
@@ -2379,7 +2357,6 @@ function PassageScreen({ passage, solvedWords, onPickWord, onOpenTeacher, onSwit
   return (
     <div className="max-w-5xl mx-auto px-6 py-8 step-in relative">
       <FloatingDecor density={5} />
-      <PersistentCompanion avatarConfig={avatarConfig} />
       {/* pl-14/pr-14 clear the fixed close (X) and sound-toggle buttons
           pinned at top-4 left-4 / top-4 right-4 (same overlap fixed on
           TeacherScreen: this row's title and "Teacher view" button would
@@ -2740,19 +2717,6 @@ function pickWarmVoice() {
   return enVoices[0] || voices[0] || null;
 }
 
-const speakingListeners = new Set();
-function notifySpeaking(isSpeaking) {
-  speakingListeners.forEach((fn) => fn(isSpeaking));
-}
-function useIsSpeaking() {
-  const [speaking, setSpeaking] = useState(false);
-  useEffect(() => {
-    speakingListeners.add(setSpeaking);
-    return () => speakingListeners.delete(setSpeaking);
-  }, []);
-  return speaking;
-}
-
 function speak(text) {
   try {
     const synth = window.speechSynthesis;
@@ -2764,9 +2728,6 @@ function speak(text) {
     utter.rate = 0.94;
     utter.pitch = 1.08;
     utter.volume = 1;
-    utter.onstart = () => notifySpeaking(true);
-    utter.onend = () => notifySpeaking(false);
-    utter.onerror = () => notifySpeaking(false);
     synth.speak(utter);
   } catch (e) {
     /* speech synthesis unsupported, fail silently */
