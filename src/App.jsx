@@ -928,6 +928,11 @@ async function callClaude(systemPrompt, messages) {
     // daily-quota-exhausted 429 (won't clear until tomorrow, no point
     // retrying) — see the matching comments in api/_claudeHandler.js.
     err.retryable = data?.retryable === true;
+    // The exact wait Groq says is actually needed (see the matching
+    // comment in api/_claudeHandler.js), when it sent one — lets
+    // callClaudeWithRetry wait exactly that long instead of a fixed
+    // guess that can be shorter than what's really required.
+    err.retryAfterMs = typeof data?.retryAfterMs === "number" ? data.retryAfterMs : null;
     throw err;
   }
   const data = await response.json();
@@ -1214,7 +1219,19 @@ async function callClaudeWithRetry(systemPrompt, messages, attempts = MAX_RETRY_
       if (NON_RETRYABLE_STATUSES.has(e.status) && !wasRetryable429) break;
     }
     if (i < attempts - 1) {
-      await new Promise((resolve) => setTimeout(resolve, wasRetryable429 ? RETRYABLE_429_WAIT_MS : 400 * (i + 1)));
+      // Prefer the exact wait Groq told us was needed (see retryAfterMs
+      // in callClaude) over the fixed guess below — retrying earlier than
+      // the real ceiling just fails again for the same reason, seen live
+      // on a heavier call (the diagnostic report) whose actual required
+      // wait exceeded the fixed constant. +500ms covers round-trip/clock
+      // slack rather than retrying at the exact reported instant. Only
+      // fall back to the fixed guess when Groq gave no specific number —
+      // flooring at the fixed wait even when the real one is shorter would
+      // just be needlessly slow.
+      const retryDelay = wasRetryable429
+        ? (lastError.retryAfterMs != null ? lastError.retryAfterMs + 500 : RETRYABLE_429_WAIT_MS)
+        : 400 * (i + 1);
+      await new Promise((resolve) => setTimeout(resolve, retryDelay));
     }
   }
   throw lastError || new Error("Couldn't get a response, please try again");

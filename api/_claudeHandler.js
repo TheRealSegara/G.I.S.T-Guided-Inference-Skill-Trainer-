@@ -281,7 +281,32 @@ export default async function claudeHandler(req, res) {
       // window of single-digit-to-tens of seconds — so it's worth the
       // client auto-retrying rather than surfacing a dead end.
       const retryable = response.status === 429;
-      return res.status(response.status).json({ error: data?.error?.message || "Upstream error", quota, ...(retryable ? { retryable: true } : {}) });
+      // The exact wait Groq actually needs varies a lot by how close to
+      // the ceiling the account is (seen live: anywhere from a couple
+      // seconds up to 20+), and the client's own fixed retry delay is
+      // just a guess for when this isn't available — passing the real
+      // number through lets the client wait exactly as long as told
+      // instead of sometimes retrying too early and failing again. Prefer
+      // the standard Retry-After header (seconds) when Groq sends one;
+      // otherwise fall back to parsing the "try again in Ns" the error
+      // message already contains (confirmed present live, e.g. "Please
+      // try again in 23.1225s").
+      let retryAfterMs = null;
+      if (retryable) {
+        const headerSeconds = Number(response.headers.get("retry-after"));
+        if (Number.isFinite(headerSeconds) && headerSeconds > 0) {
+          retryAfterMs = Math.ceil(headerSeconds * 1000);
+        } else {
+          const match = /try again in ([\d.]+)s/i.exec(data?.error?.message || "");
+          if (match) retryAfterMs = Math.ceil(parseFloat(match[1]) * 1000);
+        }
+      }
+      return res.status(response.status).json({
+        error: data?.error?.message || "Upstream error",
+        quota,
+        ...(retryable ? { retryable: true } : {}),
+        ...(retryAfterMs ? { retryAfterMs } : {}),
+      });
     }
     return res.status(200).json({ ...toAnthropicShape(data), quota });
   } catch (err) {
