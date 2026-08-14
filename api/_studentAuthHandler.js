@@ -1,10 +1,10 @@
-// Shared handler for student sign-up and login, used by both
-// api/student-auth.js (Vercel) and server.js. Requires a valid teacher-
-// level token (issued by /api/auth after a correct access code), so
-// student accounts only exist inside an already-unlocked device/session
-// and are scoped to that access code's label — two schools can each have
-// a student named "Ahmad" without collision, and one school can't see
-// another's roster.
+// Shared handler for student sign-up, login, and teacher-mediated secret
+// reset, used by both api/student-auth.js (Vercel) and server.js. Requires
+// a valid teacher-level token (issued by /api/auth after a correct access
+// code), so student accounts only exist inside an already-unlocked
+// device/session and are scoped to that access code's label — two schools
+// can each have a student named "Ahmad" without collision, and one school
+// can't see another's roster.
 //
 // The student "password" is a 3-animal secret sequence, not a real
 // password: this is a supervised-classroom access gate for tracking
@@ -18,7 +18,7 @@ import { isOriginAllowed, getClientIp, pruneIfLarge, isPlainObjectWithOnlyKeys }
 import { getSupabase } from "./_supabase.js";
 import { normalizeName, isValidFullName, isValidSecret, isValidAvatarConfig, hashSecret, secretHashesMatch } from "./_studentAuth.js";
 
-const ALLOWED_BODY_KEYS = ["mode", "fullName", "secret", "avatarConfig"];
+const ALLOWED_BODY_KEYS = ["mode", "fullName", "secret", "avatarConfig", "studentId"];
 const TOKEN_TTL_MINUTES = Number(process.env.TOKEN_TTL_MINUTES) || 720;
 
 // Shared with signup and login: a classroom of students authenticating in
@@ -132,9 +132,50 @@ export default async function studentAuthHandler(req, res) {
   }
 
   const { mode, fullName, avatarConfig } = req.body;
-  if (mode !== "signup" && mode !== "login") {
+  if (mode !== "signup" && mode !== "login" && mode !== "reset") {
     return res.status(400).json({ error: "Invalid mode" });
   }
+
+  // Teacher-mediated reset: a student who forgot their secret animals has
+  // no email to send a reset link to, so recovery instead goes through
+  // the teacher, who already holds the token this whole endpoint requires.
+  // Keyed by studentId (the teacher picks the roster row directly) rather
+  // than fullName+secret like signup/login, and re-checks access_code_label
+  // itself rather than trusting the row lookup alone, so a teacher token
+  // for one school's code can't be used to reset a student under another
+  // school's code even if the studentId were guessed or leaked.
+  if (mode === "reset") {
+    const studentId = req.body.studentId;
+    if (typeof studentId !== "string" || !studentId) {
+      return res.status(400).json({ error: "Missing studentId" });
+    }
+    if (!isValidSecret(req.body.secret)) {
+      return res.status(400).json({ error: "Please pick 3 new secret animals" });
+    }
+    const newSecretHash = hashSecret(req.body.secret, secret);
+
+    const { data: student, error: lookupError } = await supabase
+      .from("students")
+      .select("id, access_code_label")
+      .eq("id", studentId)
+      .maybeSingle();
+    if (lookupError) {
+      return res.status(502).json({ error: "Couldn't reach the database, please try again" });
+    }
+    if (!student || student.access_code_label !== claims.label) {
+      return res.status(404).json({ error: "Student not found" });
+    }
+
+    const { error: updateError } = await supabase
+      .from("students")
+      .update({ secret_hash: newSecretHash })
+      .eq("id", studentId);
+    if (updateError) {
+      return res.status(502).json({ error: "Couldn't reset the secret, please try again" });
+    }
+    return res.status(200).json({ ok: true });
+  }
+
   if (!isValidFullName(fullName)) {
     return res.status(400).json({ error: "Please enter a valid name" });
   }

@@ -997,6 +997,18 @@ async function studentLogin(fullName, secretSequence) {
   return data;
 }
 
+// Teacher-mediated recovery for a student who forgot their secret
+// animals: the teacher picks the roster row and sets a new sequence with
+// the student right there, no email/identity-verification flow needed
+// since the teacher's own token is already the authorization.
+async function resetStudentSecret(studentId, secretSequence) {
+  return apiRequest("/api/student-auth", {
+    method: "POST",
+    token: currentAuthToken,
+    body: { mode: "reset", studentId, secret: secretSequence },
+  });
+}
+
 async function saveSession(payload) {
   return apiRequest("/api/session", { method: "POST", token: currentStudentToken, body: payload });
 }
@@ -1868,6 +1880,9 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
           />
           <SecretAnimalPicker value={authSecret} onChange={setAuthSecret} />
           {authError && <p className="font-body text-xs text-rose-600 text-center mt-4" aria-live="polite">{authError}</p>}
+          <p className="font-body text-xs text-stone-400 text-center mt-4">
+            Forgot your secret animals? Ask your teacher, they can reset it from the File Box.
+          </p>
           <div className="flex items-center justify-center gap-3 mt-6">
             <BigButton variant="ghost" onClick={() => setMode("student-choice")}>
               <ChevronLeft className="inline w-4 h-4 mr-1" /> Back
@@ -2663,6 +2678,93 @@ function CloseConfirmModal({ onCancel, onConfirm, screen, studentId }) {
           </BigButton>
           <BigButton ref={confirmRef} variant="outline" onClick={onConfirm}>
             Yes, close
+          </BigButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Teacher-mediated recovery for a student who forgot their secret animals
+// (see resetStudentSecret): reuses SecretAnimalPicker so picking the new
+// sequence looks identical to signup/login, just from the teacher's
+// device. Unlike CloseConfirmModal's 2-button focus trap, this dialog has
+// many focusable controls (8 animal buttons plus Cancel/Confirm), so the
+// trap here cycles through every focusable element inside the dialog
+// rather than hardcoding first/last refs.
+function ResetSecretModal({ student, onCancel, onReset }) {
+  const [secret, setSecret] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const dialogRef = useRef(null);
+
+  useEffect(() => {
+    dialogRef.current?.querySelector("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])")?.focus();
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") { onCancel(); return; }
+      if (e.key !== "Tab" || !dialogRef.current) return;
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])")
+      ).filter((el) => !el.disabled);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onCancel]);
+
+  async function handleConfirm() {
+    if (secret.length !== SECRET_LENGTH || loading) return;
+    SFX.click();
+    setLoading(true);
+    setError(null);
+    try {
+      await resetStudentSecret(student.id, secret);
+      onReset();
+    } catch (e) {
+      setError(e.message || "Couldn't reset the secret, please try again");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center p-6" style={{ zIndex: 1000 }}>
+      <div className="absolute inset-0" style={{ background: "rgba(41,37,36,0.55)", backdropFilter: "blur(4px)" }} onClick={onCancel} aria-hidden="true" />
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reset-secret-heading"
+        className="relative bg-white p-6 sm:p-8 text-center max-w-sm w-full step-in"
+        style={CARD_NEUTRAL}
+      >
+        <p className="text-4xl mb-3">🔑</p>
+        <p id="reset-secret-heading" className="font-display font-800 text-xl text-stone-700 mb-2">
+          Reset {student.fullName}'s secret
+        </p>
+        <p className="font-body text-sm text-stone-500 mb-5">
+          Pick 3 new secret animals with {student.fullName} right now, then have them log in with these instead of the old ones.
+        </p>
+        <SecretAnimalPicker value={secret} onChange={setSecret} />
+        {error && <p className="font-body text-xs text-rose-600 text-center mt-4" aria-live="polite">{error}</p>}
+        <div className="flex items-center justify-center gap-3 mt-6">
+          <BigButton variant="ghost" onClick={onCancel} disabled={loading}>
+            Cancel
+          </BigButton>
+          <BigButton onClick={handleConfirm} disabled={secret.length !== SECRET_LENGTH || loading}>
+            {loading ? "Saving…" : "Set new secret"}
           </BigButton>
         </div>
       </div>
@@ -5077,6 +5179,8 @@ function FileBoxScreen({ onBack }) {
   const [sessionDetail, setSessionDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState(null);
+  const [resetTarget, setResetTarget] = useState(null); // roster entry currently being secret-reset, or null
+  const [resetSuccessName, setResetSuccessName] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -5203,22 +5307,56 @@ function FileBoxScreen({ onBack }) {
       {roster && roster.length === 0 && (
         <p className="font-body text-sm text-stone-500 relative z-10">No students yet. They'll show up here once someone signs up as a new student.</p>
       )}
+      {resetSuccessName && (
+        <div
+          className="flex items-center justify-between gap-2 mb-3 px-4 py-2.5 rounded-2xl bg-emerald-50 relative z-10"
+          style={{ border: "2px solid #34d399" }}
+          aria-live="polite"
+        >
+          <p className="font-body text-xs text-emerald-700">✅ New secret set for {resetSuccessName}. They can log in with it now.</p>
+          <button
+            onClick={() => setResetSuccessName(null)}
+            className="font-body text-xs text-emerald-700 underline shrink-0"
+            aria-label="Dismiss"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       <div className="flex flex-col gap-2.5 relative z-10">
         {roster?.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => openStudent(s)}
-            className="flex items-center justify-between text-left px-4 py-3.5 bg-white rounded-2xl hover:scale-[1.01] transition-all"
-            style={{ border: "3px solid #d6d3d1" }}
-          >
-            <p className="font-display font-800 text-sm text-stone-700">{s.fullName}</p>
-            <p className="font-body text-xs text-stone-500">
-              {s.sessionCount} session{s.sessionCount === 1 ? "" : "s"}
-              {s.lastSessionAt ? ` · last played ${new Date(s.lastSessionAt).toLocaleDateString()}` : ""}
-            </p>
-          </button>
+          <div key={s.id} className="flex items-center gap-2">
+            <button
+              onClick={() => openStudent(s)}
+              className="flex-1 flex items-center justify-between text-left px-4 py-3.5 bg-white rounded-2xl hover:scale-[1.01] transition-all"
+              style={{ border: "3px solid #d6d3d1" }}
+            >
+              <p className="font-display font-800 text-sm text-stone-700">{s.fullName}</p>
+              <p className="font-body text-xs text-stone-500">
+                {s.sessionCount} session{s.sessionCount === 1 ? "" : "s"}
+                {s.lastSessionAt ? ` · last played ${new Date(s.lastSessionAt).toLocaleDateString()}` : ""}
+              </p>
+            </button>
+            <button
+              onClick={() => { SFX.tap(); setResetSuccessName(null); setResetTarget(s); }}
+              className="shrink-0 w-11 h-11 rounded-full bg-white flex items-center justify-center text-base"
+              style={{ border: "2px solid #e7e5e4", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
+              title={`Reset ${s.fullName}'s secret`}
+              aria-label={`Reset ${s.fullName}'s secret`}
+            >
+              🔑
+            </button>
+          </div>
         ))}
       </div>
+
+      {resetTarget && (
+        <ResetSecretModal
+          student={resetTarget}
+          onCancel={() => setResetTarget(null)}
+          onReset={() => { setResetSuccessName(resetTarget.fullName); setResetTarget(null); }}
+        />
+      )}
     </div>
   );
 }
