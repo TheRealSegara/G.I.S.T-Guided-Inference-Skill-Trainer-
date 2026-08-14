@@ -31,6 +31,19 @@ const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const ALLOWED_MODEL = "claude-sonnet-4-6"; // the model name App.jsx still sends; unused beyond validation
 const MAX_TOKENS_CAP = 1000;
+// The diagnostic report is the one call that genuinely needs more room:
+// it writes five separate fields (summary, core pattern, how reliable,
+// story understanding, what to try), three of which require a headline
+// sentence plus 2-4 bullet points each — comfortably more prose than any
+// other call in the app produces. At the shared MAX_TOKENS_CAP this was
+// getting cut off mid-JSON (seen live), which safeParseJSON in App.jsx
+// can't repair since the content was never generated, not just malformed
+// — so every attempt failed with "Response wasn't valid JSON" instead of
+// a usable report. Still well inside Groq's shared 8,000 TPM ceiling for
+// a single call (see DAILY_QUOTA_PER_CODE in _shared.js for the other
+// numbers), and gated to only this one prompt (see isDiagnosticPrompt
+// below) so every other, lighter call keeps the tighter default cap.
+const DIAGNOSTIC_MAX_TOKENS_CAP = 1800;
 const MAX_MESSAGES = 40;
 const MAX_MESSAGE_CHARS = 8000;
 const MAX_SYSTEM_CHARS = 12000;
@@ -64,9 +77,14 @@ const MAX_SYSTEM_CHARS = 12000;
 // prompt strings), which is out of scope for this pass. This still closes
 // off the main abuse case (using the endpoint as an open LLM proxy for
 // unrelated prompts).
+// Pulled out on its own (rather than left inline in FIXED_SYSTEM_PREFIXES
+// below) because the diagnostic call also needs a taller max_tokens cap
+// than every other call — see DIAGNOSTIC_MAX_TOKENS_CAP.
+const DIAGNOSTIC_SYSTEM_PROMPT_PREFIX =
+  "You are the G.I.S.T. diagnostic engine. G.I.S.T. is purely an assessment tool,";
+
 const FIXED_SYSTEM_PREFIXES = [
-  // DIAGNOSTIC_SYSTEM_PROMPT
-  "You are the G.I.S.T. diagnostic engine. G.I.S.T. is purely an assessment tool,",
+  DIAGNOSTIC_SYSTEM_PROMPT_PREFIX,
   // TRANSFER_TEST_SYSTEM_PROMPT
   "A Malaysian primary school ESL student just worked out a vocabulary word inside one specific passage.",
   // COMPREHENSION_SYSTEM_PROMPT
@@ -90,6 +108,14 @@ function isAllowedSystemPrompt(system) {
   if (FIXED_SYSTEM_PREFIXES.some((p) => system.startsWith(p))) return true;
   const idx = system.indexOf(COACH_PROMPT_MARKER);
   return idx !== -1 && idx <= COACH_PROMPT_MARKER_MAX_OFFSET;
+}
+
+// Same prefix-pinning approach as isAllowedSystemPrompt, reused here to
+// pick the token cap rather than trust a client-sent value — App.jsx also
+// requests a taller max_tokens for this call, but the server decides the
+// real ceiling either way.
+function isDiagnosticPrompt(system) {
+  return system.startsWith(DIAGNOSTIC_SYSTEM_PROMPT_PREFIX);
 }
 
 // Best-effort per-instance rate limit. Serverless instances are short-lived
@@ -269,7 +295,10 @@ export default async function claudeHandler(req, res) {
       body: JSON.stringify({
         model: GROQ_MODEL,
         messages: toGroqMessages(req.body.system, req.body.messages),
-        max_tokens: Math.min(req.body.max_tokens || MAX_TOKENS_CAP, MAX_TOKENS_CAP),
+        max_tokens: Math.min(
+          req.body.max_tokens || MAX_TOKENS_CAP,
+          isDiagnosticPrompt(req.body.system) ? DIAGNOSTIC_MAX_TOKENS_CAP : MAX_TOKENS_CAP
+        ),
       }),
     });
 

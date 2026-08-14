@@ -899,7 +899,7 @@ function useQuotaStatus() {
 }
 
 /* ---------------- API helper ---------------- */
-async function callClaude(systemPrompt, messages) {
+async function callClaude(systemPrompt, messages, maxTokens = 1000) {
   const response = await fetch("/api/claude", {
     method: "POST",
     headers: {
@@ -908,7 +908,7 @@ async function callClaude(systemPrompt, messages) {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
-      max_tokens: 1000,
+      max_tokens: maxTokens,
       system: systemPrompt,
       messages,
     }),
@@ -1204,12 +1204,12 @@ function validateCoachResponse(parsed, targetWordText) {
   return true;
 }
 
-async function callClaudeWithRetry(systemPrompt, messages, attempts = MAX_RETRY_ATTEMPTS, validate = null) {
+async function callClaudeWithRetry(systemPrompt, messages, attempts = MAX_RETRY_ATTEMPTS, validate = null, maxTokens = 1000) {
   let lastError = null;
   for (let i = 0; i < attempts; i++) {
     let wasRetryable429 = false;
     try {
-      const raw = await callClaude(systemPrompt, messages);
+      const raw = await callClaude(systemPrompt, messages, maxTokens);
       const parsed = safeParseJSON(raw);
       if (parsed && (!validate || validate(parsed))) return parsed;
       lastError = new Error(parsed ? "Response didn't match the expected shape" : "Response wasn't valid JSON");
@@ -4985,7 +4985,14 @@ function TeacherScreen({ studentId, log, onBack, onReset, sessionStartedAt, comp
       content: `Student: ${studentId}\nLog (chronological, oldest first):\n${JSON.stringify(logForModel, null, 2)}\n\nWhole-passage comprehension check:\n${JSON.stringify(comprehensionForModel, null, 2)}${teacherNotes.trim() ? `\n\nTeacher notes about this session's context: ${teacherNotes.trim()}` : ""}`,
     };
     try {
-      const parsed = await callClaudeWithRetry(DIAGNOSTIC_SYSTEM_PROMPT, [userMsg], MAX_RETRY_ATTEMPTS, (p) => p && p.corePattern);
+      // Taller max_tokens than every other call: the report writes five
+      // fields, three of which need a headline sentence plus bullet
+      // points each — more prose than the default 1000-token cap can
+      // reliably fit, which was cutting the reply off mid-JSON. The
+      // server enforces its own matching cap for this prompt regardless
+      // of what's requested here (see DIAGNOSTIC_MAX_TOKENS_CAP in
+      // api/_claudeHandler.js).
+      const parsed = await callClaudeWithRetry(DIAGNOSTIC_SYSTEM_PROMPT, [userMsg], MAX_RETRY_ATTEMPTS, (p) => p && p.corePattern, 1800);
       const nextSummary = {
         summary: parsed.summary || "",
         corePattern: parsed.corePattern,
