@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Sparkles, RotateCcw, ArrowRight, GraduationCap, ChevronLeft, Trophy, Footprints, Play, Wrench } from "lucide-react";
 
 /* ---------------- Fonts ---------------- */
@@ -2753,7 +2754,16 @@ function ResetSecretModal({ student, onCancel, onReset }) {
     }
   }
 
-  return (
+  // Portal straight to document.body: this modal is opened from inside
+  // FileBoxScreen's own root div, which carries the "step-in" entrance
+  // animation class. That animation's keyframes set a (non-"none")
+  // transform, and per CSS spec any element with a transform becomes the
+  // containing block for its `position: fixed` descendants — so without
+  // the portal, "fixed inset-0" below would size itself to FileBoxScreen's
+  // own max-w-2xl column instead of the real viewport, leaving the
+  // backdrop as a dark rectangle in the middle of the screen instead of
+  // covering it edge to edge.
+  return createPortal(
     <div className="fixed inset-0 flex items-center justify-center p-6" style={{ zIndex: 1000 }}>
       <div className="absolute inset-0" style={{ background: "rgba(41,37,36,0.55)", backdropFilter: "blur(4px)" }} onClick={onCancel} aria-hidden="true" />
       <div
@@ -2782,7 +2792,8 @@ function ResetSecretModal({ student, onCancel, onReset }) {
           </BigButton>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -2831,7 +2842,11 @@ function ConfirmDeleteModal({ heading, message, confirmLabel = "Yes, delete", on
     }
   }
 
-  return (
+  // Portal straight to document.body — same reasoning as ResetSecretModal
+  // above: this is opened from inside FileBoxScreen's "step-in"-classed
+  // root div, whose entrance-animation transform would otherwise trap
+  // "fixed inset-0" to that div's own bounds instead of the real viewport.
+  return createPortal(
     <div className="fixed inset-0 flex items-center justify-center p-6" style={{ zIndex: 1000 }}>
       <div className="absolute inset-0" style={{ background: "rgba(41,37,36,0.55)", backdropFilter: "blur(4px)" }} onClick={onCancel} aria-hidden="true" />
       <div
@@ -2857,7 +2872,8 @@ function ConfirmDeleteModal({ heading, message, confirmLabel = "Yes, delete", on
           </BigButton>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
