@@ -51,7 +51,7 @@ export default function middleware(request) {
   if (!ALLOWED_METHODS.has(request.method)) {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405,
-      headers: { "content-type": "application/json", allow: "POST, GET, PATCH" },
+      headers: { "content-type": "application/json", allow: "POST, GET, PATCH, DELETE" },
     });
   }
 

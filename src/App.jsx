@@ -5398,7 +5398,21 @@ function FileBoxScreen({ onBack }) {
             onCancel={() => setDeleteSessionTarget(null)}
             onConfirm={async () => {
               await deleteSession(deleteSessionTarget.id);
-              setSessions((prev) => prev.filter((sess) => sess.id !== deleteSessionTarget.id));
+              const remaining = sessions.filter((sess) => sess.id !== deleteSessionTarget.id);
+              setSessions(remaining);
+              // Keep the roster screen's cached sessionCount/lastSessionAt
+              // in sync too, so navigating "Back to roster" right after a
+              // delete doesn't show stale counts until the whole File Box
+              // is reopened and fetchTeacherRoster() reruns.
+              const newLastSessionAt = remaining.reduce(
+                (latest, sess) => (!latest || sess.finishedAt > latest ? sess.finishedAt : latest),
+                null
+              );
+              setRoster((prev) =>
+                prev?.map((r) =>
+                  r.id === selectedStudent.id ? { ...r, sessionCount: remaining.length, lastSessionAt: newLastSessionAt } : r
+                ) ?? prev
+              );
               setDeleteSessionTarget(null);
             }}
           />

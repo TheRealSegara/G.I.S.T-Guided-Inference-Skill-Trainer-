@@ -156,7 +156,7 @@ export default async function studentAuthHandler(req, res) {
 
     const { data: student, error: lookupError } = await supabase
       .from("students")
-      .select("id, access_code_label")
+      .select("id, access_code_label, full_name_key")
       .eq("id", studentId)
       .maybeSingle();
     if (lookupError) {
@@ -173,6 +173,12 @@ export default async function studentAuthHandler(req, res) {
     if (updateError) {
       return res.status(502).json({ error: "Couldn't reset the secret, please try again" });
     }
+    // A student who forgot their secret often got there by repeatedly
+    // guessing wrong first, which may have tripped the login lockout below
+    // — without this, a freshly-reset (correct) secret would still get
+    // rejected by that lockout for up to LOGIN_LOCKOUT_MS after the reset,
+    // defeating the point of resetting it at all.
+    clearLoginFailures(loginFailKey(claims.label, student.full_name_key));
     return res.status(200).json({ ok: true });
   }
 
