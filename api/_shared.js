@@ -12,17 +12,29 @@ import { ipAddress } from "@vercel/functions";
 // so the two can never drift apart.
 //
 // Default is deliberately set just under Groq's real free-tier ceiling for
-// llama-3.1-8b-instant: 500,000 tokens/day, no billing linked — verify your
-// own live numbers at console.groq.com/docs/rate-limits, they can differ by
-// account and model. That's not the same as 500,000 / (some fixed token
-// count) because different calls in this app cost very different amounts
-// (a coach turn's ~1,800-1,900 tokens dwarfs a short student-answer retry),
-// so this is a conservative estimate (~270 calls/day headroom, rounded down
-// hard) rather than an exact division. Since the token ceiling is shared by
-// the whole API key regardless of what we set here, going higher wouldn't
-// unlock more real usage, it would just mean Groq's raw error shows up
-// instead of ours.
-export const DAILY_QUOTA_PER_CODE = Number(process.env.DAILY_QUOTA_PER_CODE) || 200;
+// openai/gpt-oss-20b: 200,000 tokens/day AND 1,000 requests/day, no billing
+// linked — verify your own live numbers at console.groq.com/docs/rate-
+// limits, they can differ by account and model. That's not the same as
+// 200,000 / (some fixed token count) because different calls in this app
+// cost very different amounts (a coach turn's ~1,800-1,900 tokens dwarfs a
+// short student-answer retry), so this is a conservative estimate rounded
+// down hard, not an exact division. Since the token/request ceiling is
+// shared by the whole API key regardless of what we set here, going higher
+// wouldn't unlock more real usage, it would just mean Groq's raw error
+// shows up instead of ours.
+//
+// IMPORTANT if you run more than one access code (school) off the same
+// Groq key: this limit is applied PER code, but Groq's 1,000 requests/day
+// and 200,000 tokens/day ceilings are shared across ALL codes combined —
+// this default assumes a single code. Running N codes at the default value
+// can collectively exceed Groq's real ceiling well before any individual
+// code hits its own limit; lower this value (e.g. ~100/N) via the env var
+// if you have more than one access code configured. This is a meaningfully
+// tighter budget than the old llama-3.1-8b-instant model this app used
+// before Groq decommissioned it on 2026-08-16 (that model's free tier was
+// 14,400 requests/day and 500,000 tokens/day — gpt-oss-20b's real-world
+// ceiling is over 10x tighter on requests/day alone).
+export const DAILY_QUOTA_PER_CODE = Number(process.env.DAILY_QUOTA_PER_CODE) || 100;
 
 export function getAllowedOrigins() {
   return (process.env.ALLOWED_ORIGINS || "")

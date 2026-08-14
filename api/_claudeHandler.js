@@ -21,7 +21,13 @@ import { isOriginAllowed, getClientIp, pruneIfLarge, isPlainObjectWithOnlyKeys, 
 const ALLOWED_BODY_KEYS = ["model", "system", "messages", "max_tokens"];
 const ALLOWED_MESSAGE_KEYS = ["role", "content"];
 
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
+// llama-3.1-8b-instant was decommissioned by Groq on 2026-08-16; this
+// default was switched to their recommended replacement ahead of that
+// date. See the RATE_LIMIT_MAX_REQUESTS and DAILY_QUOTA_PER_CODE comments
+// below/in _shared.js — the free-tier ceiling for this model is NOT the
+// same shape as the old one (RPD and TPD both dropped, TPM went up
+// slightly), so those were retuned alongside this, not just the name.
+const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const ALLOWED_MODEL = "claude-sonnet-4-6"; // the model name App.jsx still sends; unused beyond validation
 const MAX_TOKENS_CAP = 1000;
@@ -93,19 +99,21 @@ function isAllowedSystemPrompt(system) {
 // account-wide limits are the real backstops; this is a cheap first layer
 // against obvious abuse, not a precise model of Groq's shared token budget.
 //
-// Set to match Groq's actual stated free-tier ceiling for
-// llama-3.1-8b-instant (30 requests/minute, no billing linked — verify
-// your own live numbers at console.groq.com/docs/rate-limits, they can
-// differ by account and model), the same "match the real number, don't
-// try to be clever about a sub-limit" approach used for the Gemini
-// version. An earlier attempt here tried to preempt Groq's *token*-per-
-// minute ceiling (6,000) instead by estimating ~3 calls/minute, then 10 —
-// both were confirmed live to be too tight, tripping this during normal
+// Set to match Groq's actual stated free-tier RPM ceiling (no billing
+// linked — verify your own live numbers at console.groq.com/docs/rate-
+// limits, they can differ by account and model), the same "match the real
+// number, don't try to be clever about a sub-limit" approach used for the
+// Gemini version. An earlier attempt tried to preempt Groq's *token*-per-
+// minute ceiling instead by estimating a smaller calls/minute figure —
+// confirmed live to be too tight, tripping this during normal
 // single-student play, not abuse. A higher value than the real ceiling
 // would be pointless: Groq's own limit would reject the request first
 // regardless, just with a raw upstream error instead of our own clearer
 // message — exactly the outcome to avoid, so this matches their number
-// directly rather than a hand-estimated fraction of it.
+// directly rather than a hand-estimated fraction of it. Still 30 for
+// openai/gpt-oss-20b (same as the old llama-3.1-8b-instant RPM), but its
+// RPD and TPD ceilings are both considerably tighter — see
+// DAILY_QUOTA_PER_CODE in _shared.js.
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 30;
 const requestLog = new Map();

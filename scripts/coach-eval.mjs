@@ -17,7 +17,7 @@
 //
 // Usage: GROQ_API_KEY=... node scripts/coach-eval.mjs [runsPerScenario]
 
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
+const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const RUNS_PER_SCENARIO = Number(process.argv[2]) || 3;
 
