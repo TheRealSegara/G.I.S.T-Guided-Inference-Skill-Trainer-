@@ -299,9 +299,43 @@ async function handlePatch(req, res, claims) {
   return res.status(200).json({ ok: true });
 }
 
+// A teacher permanently deleting one session (e.g. cleaning up test data),
+// distinct from a student's own session history staying intact otherwise.
+// session_words rows are removed automatically by the FK's ON DELETE
+// CASCADE (see supabase/schema.sql), so this is a single delete here.
+async function handleDelete(req, res, claims) {
+  if (claims.kind === "student") {
+    return res.status(403).json({ error: "Teacher access required" });
+  }
+  const sessionId = typeof req.query?.sessionId === "string" ? req.query.sessionId : null;
+  if (!sessionId) {
+    return res.status(400).json({ error: "Missing sessionId" });
+  }
+
+  const supabase = getSupabase();
+  if (!supabase) {
+    return res.status(500).json({ error: "Server is missing SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY" });
+  }
+
+  const { data: session, error: sessionError } = await supabase
+    .from("sessions")
+    .select("id, students!inner(access_code_label)")
+    .eq("id", sessionId)
+    .single();
+  if (sessionError || !session || session.students.access_code_label !== claims.label) {
+    return res.status(404).json({ error: "Session not found" });
+  }
+
+  const { error: deleteError } = await supabase.from("sessions").delete().eq("id", sessionId);
+  if (deleteError) {
+    return res.status(502).json({ error: "Couldn't delete the session, please try again" });
+  }
+  return res.status(200).json({ ok: true });
+}
+
 export default async function sessionHandler(req, res) {
-  if (!["POST", "GET", "PATCH"].includes(req.method)) {
-    res.setHeader("Allow", "POST, GET, PATCH");
+  if (!["POST", "GET", "PATCH", "DELETE"].includes(req.method)) {
+    res.setHeader("Allow", "POST, GET, PATCH, DELETE");
     return res.status(405).json({ error: "Method not allowed" });
   }
 
@@ -330,5 +364,6 @@ export default async function sessionHandler(req, res) {
 
   if (req.method === "POST") return handleSave(req, res, claims);
   if (req.method === "GET") return handleFetch(req, res, claims);
+  if (req.method === "DELETE") return handleDelete(req, res, claims);
   return handlePatch(req, res, claims);
 }

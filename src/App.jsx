@@ -1030,6 +1030,20 @@ async function cacheSessionDiagnostic(sessionId, diagnosticReport) {
   return apiRequest("/api/session", { method: "PATCH", token: currentAuthToken, body: { sessionId, diagnosticReport } });
 }
 
+// Permanently deletes one session (and its word log, via the DB's own
+// cascade) — for a teacher pruning a single bad/test session without
+// touching the rest of that student's history.
+async function deleteSession(sessionId) {
+  return apiRequest(`/api/session?sessionId=${encodeURIComponent(sessionId)}`, { method: "DELETE", token: currentAuthToken });
+}
+
+// Permanently deletes a whole student account and every one of their
+// sessions (cascade) — for a teacher wiping out a test/duplicate roster
+// entry entirely, not just one session under it.
+async function deleteStudentAccount(studentId) {
+  return apiRequest(`/api/teacher-roster?studentId=${encodeURIComponent(studentId)}`, { method: "DELETE", token: currentAuthToken });
+}
+
 // Failures the server can't resolve by simply being asked again: retrying
 // just delays showing the real message (or, for 401, spams /api/claude
 // with an already-invalidated token). Only network hiccups and malformed
@@ -2765,6 +2779,81 @@ function ResetSecretModal({ student, onCancel, onReset }) {
           </BigButton>
           <BigButton onClick={handleConfirm} disabled={secret.length !== SECRET_LENGTH || loading}>
             {loading ? "Saving…" : "Set new secret"}
+          </BigButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Generic "are you sure" dialog for a permanent, irreversible delete —
+// used by the File Box for both deleting one session and deleting a whole
+// student account (see FileBoxScreen). Only two focusable controls
+// (Cancel/Confirm), so this reuses CloseConfirmModal's simpler 2-ref tab
+// trap rather than ResetSecretModal's generic multi-element one.
+function ConfirmDeleteModal({ heading, message, confirmLabel = "Yes, delete", onCancel, onConfirm }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const cancelRef = useRef(null);
+  const confirmRef = useRef(null);
+
+  useEffect(() => {
+    cancelRef.current?.focus();
+    // eslint-disable-next-line
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") { onCancel(); return; }
+      if (e.key !== "Tab") return;
+      if (e.shiftKey && document.activeElement === cancelRef.current) {
+        e.preventDefault();
+        confirmRef.current?.focus();
+      } else if (!e.shiftKey && document.activeElement === confirmRef.current) {
+        e.preventDefault();
+        cancelRef.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onCancel]);
+
+  async function handleConfirm() {
+    if (loading) return;
+    SFX.click();
+    setLoading(true);
+    setError(null);
+    try {
+      await onConfirm();
+    } catch (e) {
+      setError(e.message || "Couldn't delete, please try again");
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center p-6" style={{ zIndex: 1000 }}>
+      <div className="absolute inset-0" style={{ background: "rgba(41,37,36,0.55)", backdropFilter: "blur(4px)" }} onClick={onCancel} aria-hidden="true" />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-delete-heading"
+        className="relative bg-white p-6 sm:p-8 text-center max-w-sm w-full step-in"
+        style={CARD_NEUTRAL}
+      >
+        <p className="text-4xl mb-3">🗑️</p>
+        <p id="confirm-delete-heading" className="font-display font-800 text-xl text-stone-700 mb-2">
+          {heading}
+        </p>
+        <p className="font-body text-sm text-stone-500 mb-2">{message}</p>
+        <p className="font-body text-xs text-rose-600 font-700 mb-5">This can't be undone.</p>
+        {error && <p className="font-body text-xs text-rose-600 text-center mb-4" aria-live="polite">{error}</p>}
+        <div className="flex items-center justify-center gap-3">
+          <BigButton ref={cancelRef} variant="ghost" onClick={onCancel} disabled={loading}>
+            Cancel
+          </BigButton>
+          <BigButton ref={confirmRef} variant="outline" onClick={handleConfirm} disabled={loading}>
+            {loading ? "Deleting…" : confirmLabel}
           </BigButton>
         </div>
       </div>
@@ -5181,6 +5270,8 @@ function FileBoxScreen({ onBack }) {
   const [detailError, setDetailError] = useState(null);
   const [resetTarget, setResetTarget] = useState(null); // roster entry currently being secret-reset, or null
   const [resetSuccessName, setResetSuccessName] = useState(null);
+  const [deleteStudentTarget, setDeleteStudentTarget] = useState(null); // roster entry pending delete confirmation, or null
+  const [deleteSessionTarget, setDeleteSessionTarget] = useState(null); // session pending delete confirmation, or null
 
   useEffect(() => {
     let cancelled = false;
@@ -5271,23 +5362,46 @@ function FileBoxScreen({ onBack }) {
         )}
         <div className="flex flex-col gap-2.5 relative z-10">
           {sessions?.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => openSession(s)}
-              className="flex items-center gap-3 text-left px-4 py-3.5 bg-white rounded-2xl hover:scale-[1.01] transition-all"
-              style={{ border: "3px solid #d6d3d1" }}
-            >
-              <span className="text-2xl shrink-0">{s.passageEmoji || "📖"}</span>
-              <div className="flex-1">
-                <p className="font-display font-800 text-sm text-stone-700">{s.passageTitle}</p>
-                <p className="font-body text-xs text-stone-500">
-                  {new Date(s.finishedAt).toLocaleDateString()} · {s.wordCount} word{s.wordCount === 1 ? "" : "s"}
-                  {s.comprehensionCorrect !== null ? ` · comprehension ${s.comprehensionCorrect ? "✓" : "✗"}` : ""}
-                </p>
-              </div>
-            </button>
+            <div key={s.id} className="flex items-center gap-2">
+              <button
+                onClick={() => openSession(s)}
+                className="flex-1 flex items-center gap-3 text-left px-4 py-3.5 bg-white rounded-2xl hover:scale-[1.01] transition-all"
+                style={{ border: "3px solid #d6d3d1" }}
+              >
+                <span className="text-2xl shrink-0">{s.passageEmoji || "📖"}</span>
+                <div className="flex-1">
+                  <p className="font-display font-800 text-sm text-stone-700">{s.passageTitle}</p>
+                  <p className="font-body text-xs text-stone-500">
+                    {new Date(s.finishedAt).toLocaleDateString()} · {s.wordCount} word{s.wordCount === 1 ? "" : "s"}
+                    {s.comprehensionCorrect !== null ? ` · comprehension ${s.comprehensionCorrect ? "✓" : "✗"}` : ""}
+                  </p>
+                </div>
+              </button>
+              <button
+                onClick={() => { SFX.tap(); setDeleteSessionTarget(s); }}
+                className="shrink-0 w-11 h-11 rounded-full bg-white flex items-center justify-center text-base"
+                style={{ border: "2px solid #e7e5e4", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
+                title={`Delete this ${s.passageTitle} session`}
+                aria-label={`Delete this ${s.passageTitle} session`}
+              >
+                🗑️
+              </button>
+            </div>
           ))}
         </div>
+
+        {deleteSessionTarget && (
+          <ConfirmDeleteModal
+            heading="Delete this session?"
+            message={`This permanently deletes the "${deleteSessionTarget.passageTitle}" session from ${new Date(deleteSessionTarget.finishedAt).toLocaleDateString()} and its full word log.`}
+            onCancel={() => setDeleteSessionTarget(null)}
+            onConfirm={async () => {
+              await deleteSession(deleteSessionTarget.id);
+              setSessions((prev) => prev.filter((sess) => sess.id !== deleteSessionTarget.id));
+              setDeleteSessionTarget(null);
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -5346,6 +5460,15 @@ function FileBoxScreen({ onBack }) {
             >
               🔑
             </button>
+            <button
+              onClick={() => { SFX.tap(); setResetSuccessName(null); setDeleteStudentTarget(s); }}
+              className="shrink-0 w-11 h-11 rounded-full bg-white flex items-center justify-center text-base"
+              style={{ border: "2px solid #e7e5e4", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
+              title={`Delete ${s.fullName}'s account`}
+              aria-label={`Delete ${s.fullName}'s account`}
+            >
+              🗑️
+            </button>
           </div>
         ))}
       </div>
@@ -5355,6 +5478,19 @@ function FileBoxScreen({ onBack }) {
           student={resetTarget}
           onCancel={() => setResetTarget(null)}
           onReset={() => { setResetSuccessName(resetTarget.fullName); setResetTarget(null); }}
+        />
+      )}
+
+      {deleteStudentTarget && (
+        <ConfirmDeleteModal
+          heading={`Delete ${deleteStudentTarget.fullName}'s account?`}
+          message={`This permanently deletes ${deleteStudentTarget.fullName} and every one of their ${deleteStudentTarget.sessionCount} session${deleteStudentTarget.sessionCount === 1 ? "" : "s"}.`}
+          onCancel={() => setDeleteStudentTarget(null)}
+          onConfirm={async () => {
+            await deleteStudentAccount(deleteStudentTarget.id);
+            setRoster((prev) => prev.filter((r) => r.id !== deleteStudentTarget.id));
+            setDeleteStudentTarget(null);
+          }}
         />
       )}
     </div>

@@ -3,12 +3,14 @@
 // specific student's list of past sessions. Used by both
 // api/teacher-roster.js (Vercel) and server.js.
 //
-// GET  /api/teacher-roster                -> this teacher's student roster
-// GET  /api/teacher-roster?studentId=<id> -> that student's session summaries
+// GET    /api/teacher-roster                -> this teacher's student roster
+// GET    /api/teacher-roster?studentId=<id> -> that student's session summaries
+// DELETE /api/teacher-roster?studentId=<id> -> permanently delete that student
+//   and every one of their sessions (ON DELETE CASCADE, see schema.sql)
 //
 // studentId is checked against this teacher token's access_code_label
 // before use, so a guessed/leaked student UUID from another school's
-// roster returns nothing.
+// roster returns nothing (GET) or deletes nothing (DELETE).
 
 import { verifyToken } from "./_auth.js";
 import { isOriginAllowed, getClientIp, pruneIfLarge } from "./_shared.js";
@@ -92,9 +94,33 @@ async function fetchStudentSessions(supabase, label, studentId, res) {
   });
 }
 
+// A teacher permanently deleting one whole student account — every session
+// and every session's word log go with it via ON DELETE CASCADE (see
+// supabase/schema.sql), so this is a single delete here, same pattern as
+// handleDelete in _sessionHandler.js for a single session.
+async function deleteStudent(supabase, label, studentId, res) {
+  const { data: student, error: lookupError } = await supabase
+    .from("students")
+    .select("id, access_code_label")
+    .eq("id", studentId)
+    .maybeSingle();
+  if (lookupError) {
+    return res.status(502).json({ error: "Couldn't reach the database, please try again" });
+  }
+  if (!student || student.access_code_label !== label) {
+    return res.status(404).json({ error: "Student not found" });
+  }
+
+  const { error: deleteError } = await supabase.from("students").delete().eq("id", studentId);
+  if (deleteError) {
+    return res.status(502).json({ error: "Couldn't delete this student, please try again" });
+  }
+  return res.status(200).json({ ok: true });
+}
+
 export default async function teacherRosterHandler(req, res) {
-  if (req.method !== "GET") {
-    res.setHeader("Allow", "GET");
+  if (!["GET", "DELETE"].includes(req.method)) {
+    res.setHeader("Allow", "GET, DELETE");
     return res.status(405).json({ error: "Method not allowed" });
   }
 
@@ -127,6 +153,14 @@ export default async function teacherRosterHandler(req, res) {
   }
 
   const studentId = typeof req.query?.studentId === "string" ? req.query.studentId : null;
+
+  if (req.method === "DELETE") {
+    if (!studentId) {
+      return res.status(400).json({ error: "Missing studentId" });
+    }
+    return deleteStudent(supabase, claims.label, studentId, res);
+  }
+
   if (studentId) {
     return fetchStudentSessions(supabase, claims.label, studentId, res);
   }

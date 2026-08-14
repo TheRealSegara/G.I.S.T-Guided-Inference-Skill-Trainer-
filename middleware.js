@@ -18,12 +18,14 @@ export const config = {
 };
 
 // Most routes (claude, auth, student-auth) are POST-only; session.js and
-// teacher-roster.js also need GET (teacher reading data) and, for
-// session.js, PATCH (caching a generated diagnostic report). Broadened
-// here rather than allow-listing per path so a new read-only endpoint
-// doesn't need a middleware change too — each handler still enforces its
-// own exact allowed method(s) itself, this is just the edge-level floor.
-const ALLOWED_METHODS = new Set(["POST", "GET", "PATCH"]);
+// teacher-roster.js also need GET (teacher reading data), PATCH (session.js
+// caching a generated diagnostic report), and DELETE (both: a teacher
+// deleting a single session or a whole student, see their handlers).
+// Broadened here rather than allow-listing per path so a new read-only
+// endpoint doesn't need a middleware change too — each handler still
+// enforces its own exact allowed method(s) itself, this is just the
+// edge-level floor.
+const ALLOWED_METHODS = new Set(["POST", "GET", "PATCH", "DELETE"]);
 
 function getAllowedOrigins() {
   return (process.env.ALLOWED_ORIGINS || "")
