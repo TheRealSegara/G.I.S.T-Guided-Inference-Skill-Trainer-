@@ -769,6 +769,68 @@ Respond with ONLY valid JSON, no markdown fences, no extra text, in exactly this
   "whatToTry": "string"
 }`;
 
+// The "Build Your Own G.I.S.T." blueprint handed to a teacher's AI
+// assistant (see BuildYourOwnScreen). Deliberately built as a template
+// literal that interpolates the app's real, live prompt constants above
+// rather than a second, hand-copied wall of text — this can't silently
+// drift out of date if a prompt is ever tuned again, since it's reading
+// the same constants callClaude() actually sends.
+const BUILD_YOUR_OWN_PROMPT = `You're going to help me adapt an existing AI teaching tool called G.I.S.T. (Guided Inference Skill Trainer) for my own class. Below is its complete design: what it does, how it's built, the exact prompts it sends to its AI, and the reasoning behind its trickier design decisions. Please read all of it, then help me build my own adapted version — ask me what I'd like to change before you start.
+
+=== WHAT G.I.S.T. IS ===
+
+G.I.S.T. is an AI vocabulary and reading-comprehension coach for Malaysian primary school (Year 4-6) ESL students. It does not hand a student a definition. It walks them through the skill a strong reader actually uses on an unfamiliar word: read the sentence around it, notice a clue, work the meaning out for yourself. A student picks a passage, works through a handful of target words with an AI coach that escalates through five adaptive stages of difficulty per word, then a separate AI reads back over the whole finished session and writes a plain-language diagnostic report for the teacher — not a score, a specific evidence-backed picture of where the student's understanding is solid and where it isn't.
+
+=== ARCHITECTURE ===
+
+- Frontend: a single React 18 + Vite single-page app.
+- Backend: Vercel serverless functions acting as a thin, protected proxy in front of an AI provider (Groq's free tier in the original) — the browser never holds an AI API key directly.
+- Database: Supabase (Postgres) for student accounts and session history.
+- Auth model: one shared access code per school or class, not per-teacher or per-student accounts — whoever has the code can use the app on a device until the code's session expires. Students then sign up once with their name and a 3-animal "secret" (not a real password, deliberately kid-simple), kept separate from the animal companion shown on screen so a classmate can't read it off the screen during play.
+- Cost control: every AI call is metered against a small daily quota per access code, and session word counts are fixed rather than open-ended, specifically to keep AI spend predictable on a free tier.
+
+=== THE ACTUAL AI PROMPTS ===
+
+These are copied verbatim from the real, currently-running app — not paraphrased. There are several distinct AI jobs, not one repeated chatbot call:
+
+--- THE COACH (one call per turn, escalates through up to 5 stages per word) ---
+Example instantiation (the real prompt is generated per-word with the word's specific stage-type cycle baked in):
+${buildCoachSystemPrompt("parrot", "mcq", "word_bank", "tap_select")}
+
+--- THE TRANSFER TEST (checks the word sticks outside the original sentence) ---
+${TRANSFER_TEST_SYSTEM_PROMPT}
+
+--- THE COMPREHENSION CHECK (whole-passage understanding, not per-word) ---
+${COMPREHENSION_SYSTEM_PROMPT}
+
+--- THE LEVEL MAKER (turns a teacher's own pasted passage into a lesson) ---
+${LEVEL_MAKER_SYSTEM_PROMPT(SESSION_WORD_COUNT)}
+
+--- SINGLE-WORD REGENERATION (lets a teacher swap out one word the maker picked) ---
+${SINGLE_WORD_REGEN_PROMPT}
+
+--- THE DIAGNOSTIC ENGINE (reads the whole finished session, writes the teacher's report) ---
+${DIAGNOSTIC_SYSTEM_PROMPT}
+
+=== THE DESIGN RULES BEHIND THESE PROMPTS (please preserve the reasoning, not just the words) ===
+
+- The coach is under a hard instruction to NEVER state the word's dictionary definition directly — the entire point is inference practice, not a look-up tool. If you change the subject or age group, keep this constraint.
+- Multiple-choice, true/false, tap-the-mistake, and similar "structured" answer types are checked deterministically by the app's own code, NOT trusted to the AI's judgment — the AI only free-judges answers where there genuinely is no fixed answer key (typed sentences). This exists because an AI grading its own multiple-choice question can be subtly inconsistent; a plain equality check can't.
+- The diagnostic engine is a completely separate AI call from the coach, run only once at the end of a session, reading a structured log rather than the raw conversation — this keeps the report's judgment independent of whatever tone the coach happened to take mid-session.
+- There's a deliberate minimum pacing delay before a student can submit an answer, and the app tracks whether an answer landed suspiciously close to that floor — a signal for "this was a guess," fed into the diagnostic report as evidence, not a hard block.
+- Every report claim names the specific word and evidence behind it. It never predicts future performance, never suggests reteaching, and always ends in one real, specific next classroom action — it's built to be an assessment tool, not a re-teaching tool, so the teacher stays in control of what happens next.
+
+=== NOW, PLEASE ADAPT THIS FOR ME ===
+
+I'd like your help building my own version. Some directions this could go (tell me which apply, or suggest your own):
+- A different age group or proficiency level than Year 4-6 ESL.
+- A different primary language emphasis (e.g. leaning more into Bahasa Malaysia, or a different second language entirely).
+- A different subject than vocabulary/reading — the same "escalating Socratic coach + separate diagnostic report" pattern could fit other skills.
+- More or fewer target words per session than the original's 5.
+- A different visual theme or mascot/companion set than the original's animal companions.
+
+Ask me what I want before generating anything, and please keep the same overall shape (a coach that never just gives the answer, a report that always cites evidence and ends in a real action) even as the specifics change.`;
+
 /* ---------------- Access gate (auth) ---------------- */
 // Lightweight module-level bridge between the App component's auth state
 // and callClaude(), which is a plain function outside React so it can't
@@ -1348,7 +1410,7 @@ function SecretAnimalPicker({ value, onChange }) {
 }
 
 /* ---------------- Setup Screen ---------------- */
-function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoReport, bilingual, onToggleBilingual, onStudentAuthenticated, onOpenFileBox, onOpenTeacherGuide }) {
+function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoReport, bilingual, onToggleBilingual, onStudentAuthenticated, onOpenFileBox, onOpenTeacherGuide, onOpenBuildYourOwn }) {
   const [mode, setMode] = useState(null); // null (main menu) | "tour" | "play" | "maker"
   const [step, setStep] = useState(1);
   const [studentId, setStudentId] = useState("");
@@ -1602,6 +1664,15 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
                     style={{ borderColor: "#0d9488" }}
                   >
                     ❓ How G.I.S.T. works
+                  </button>
+                )}
+                {onOpenBuildYourOwn && (
+                  <button
+                    onClick={() => { SFX.tap(); onOpenBuildYourOwn(); }}
+                    className="font-display font-700 text-xs text-violet-700 hover:text-violet-900 bg-white rounded-full px-3 py-1.5 border-2"
+                    style={{ borderColor: "#7c3aed" }}
+                  >
+                    🧭 Build Your Own G.I.S.T.
                   </button>
                 )}
               </div>
@@ -5301,6 +5372,118 @@ function TeacherGuideScreen({ onBack }) {
   );
 }
 
+// A non-technical teacher's path to their own adapted copy of G.I.S.T.,
+// split into two views on purpose: "blueprint" solves the comprehension
+// barrier (handing an AI assistant the real design so it can adapt it
+// faithfully), "next-steps" solves the separate deployment barrier (the
+// actual accounts needed to put it online) — see the plan behind this
+// feature for why those two are kept apart rather than one long page.
+function BuildYourOwnScreen({ onBack }) {
+  const [view, setView] = useState("blueprint"); // "blueprint" | "next-steps"
+  const [copied, setCopied] = useState(false);
+
+  const Section = ({ icon, title, children }) => (
+    <div className="bg-white p-5 mb-4 rounded-3xl relative z-10" style={CARD_TEAL}>
+      <h2 className="font-display font-800 text-lg text-stone-700 mb-2 flex items-center gap-2">
+        <span className="text-2xl">{icon}</span> {title}
+      </h2>
+      <div className="font-body text-sm text-stone-600 leading-relaxed space-y-2">{children}</div>
+    </div>
+  );
+
+  function handleBack() {
+    SFX.tap();
+    if (view === "next-steps") { setView("blueprint"); return; }
+    onBack();
+  }
+
+  async function handleCopy() {
+    SFX.click();
+    try {
+      await navigator.clipboard.writeText(BUILD_YOUR_OWN_PROMPT);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      // Clipboard API can be unavailable (insecure context, permissions,
+      // older browser) — the prompt is still selectable by hand from the
+      // box below, so this just silently skips the one-click convenience.
+    }
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto px-6 py-8 step-in relative min-h-screen">
+      <FloatingDecor density={4} />
+      <button onClick={handleBack} className="flex items-center gap-1 font-display font-700 text-xs text-stone-600 hover:text-stone-800 bg-white rounded-full px-3 py-1.5 border-[3px] border-stone-300 relative z-10 mb-5 ml-14">
+        <ChevronLeft className="w-3.5 h-3.5" /> {view === "next-steps" ? "Back" : "Back to menu"}
+      </button>
+
+      {view === "blueprint" ? (
+        <>
+          <h1 className="font-display text-2xl font-800 text-stone-700 mb-1 relative z-10">🧭 Build Your Own G.I.S.T.</h1>
+          <p className="font-body text-xs text-stone-500 mb-5 relative z-10">
+            Hand this to an AI assistant (Claude, ChatGPT, or similar) and ask it to adapt G.I.S.T. for your own class — a different age group, a different language emphasis, even a different subject entirely.
+          </p>
+
+          <Section icon="📋" title="The blueprint">
+            <p>This is G.I.S.T.'s real design, the same prompts the app actually sends, not a summary of them. Copy it, paste it into your AI assistant of choice, and ask it to <b>adapt</b> G.I.S.T. rather than start from a blank page — it already has some hard-won lessons baked in (a grading-accuracy fix, a plain-language report rewrite, both found by testing with real students and a real teacher) that a fresh rebuild would have to relearn the hard way.</p>
+            <button
+              onClick={handleCopy}
+              className="font-display font-700 text-sm text-teal-700 hover:text-teal-900 bg-white rounded-full px-4 py-2 border-2 mt-1"
+              style={{ borderColor: "#0d9488" }}
+            >
+              {copied ? "✅ Copied!" : "📋 Copy prompt"}
+            </button>
+            <div
+              className="mt-3 p-4 rounded-2xl bg-stone-50 font-body text-xs text-stone-600 leading-relaxed whitespace-pre-wrap overflow-y-auto"
+              style={{ border: "2px solid #d6d3d1", maxHeight: "320px" }}
+            >
+              {BUILD_YOUR_OWN_PROMPT}
+            </div>
+          </Section>
+
+          <button
+            onClick={() => { SFX.tap(); setView("next-steps"); }}
+            className="w-full text-center font-display font-700 text-sm text-violet-700 hover:text-violet-900 bg-white rounded-full px-4 py-3 border-2 relative z-10"
+            style={{ borderColor: "#7c3aed" }}
+          >
+            Ready to actually put this online? Next: getting it live →
+          </button>
+        </>
+      ) : (
+        <>
+          <h1 className="font-display text-2xl font-800 text-stone-700 mb-1 relative z-10">🚀 Getting it live</h1>
+          <p className="font-body text-xs text-stone-500 mb-5 relative z-10">
+            The blueprint gets your AI assistant to write the code. To actually put it online, you'll need three free accounts ready to hand over when it asks for them.
+          </p>
+
+          <Section icon="🧠" title="Somewhere to run the AI">
+            <p>This is what lets the app talk to an AI. Groq gives out a free API key for this — free, no credit card needed.</p>
+            <p><a href="https://console.groq.com" target="_blank" rel="noopener noreferrer" className="text-teal-700 underline font-700">console.groq.com</a></p>
+          </Section>
+
+          <Section icon="🗄️" title="Somewhere to save student progress">
+            <p>This is where student accounts and their session history actually live. Supabase gives out a free database for this — free, no credit card needed.</p>
+            <p><a href="https://supabase.com" target="_blank" rel="noopener noreferrer" className="text-teal-700 underline font-700">supabase.com</a></p>
+          </Section>
+
+          <Section icon="🌐" title="Somewhere to host the website">
+            <p>This puts the finished website online with a real link you can share with your school. Vercel hosts it for free — free, no credit card needed.</p>
+            <p><a href="https://vercel.com" target="_blank" rel="noopener noreferrer" className="text-teal-700 underline font-700">vercel.com</a></p>
+          </Section>
+
+          <Section icon="🔒" title="Keep this part safe">
+            <p>Each of these three gives you a secret key. Treat every one of them exactly like a password: never paste it into a public chat, a screenshot, or a shared document. Setting one shared access code for your own school or class, rather than leaving the tool fully open to anyone, is what keeps it locked to your own students once it's live.</p>
+          </Section>
+
+          <div className="mt-2 p-4 rounded-2xl text-center relative z-10" style={{ border: "2px solid #7c3aed", background: "#f5f3ff" }}>
+            <p className="font-body text-sm text-stone-600">Once you have these three ready, go back to the AI assistant you pasted the blueprint into and hand them over — it can take it from there.</p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ---------------- Teacher File Box ---------------- */
 // The teacher-facing view of persisted student progress: every student
 // who has signed up under this device's access code, and their past
@@ -5796,7 +5979,7 @@ export default function App() {
     );
   }
 
-  const mainPalette = ["teacher", "demo-report", "file-box", "teacher-guide"].includes(screen) ? "teal" : "gold";
+  const mainPalette = ["teacher", "demo-report", "file-box", "teacher-guide", "build-your-own"].includes(screen) ? "teal" : "gold";
 
   return (
     <div className="min-h-screen text-stone-700" style={{ fontFamily: "ui-sans-serif, system-ui", background: "#FAF6EF" }}>
@@ -5854,6 +6037,7 @@ export default function App() {
             }}
             onOpenFileBox={() => setScreen("file-box")}
             onOpenTeacherGuide={() => setScreen("teacher-guide")}
+            onOpenBuildYourOwn={() => setScreen("build-your-own")}
           />
         )}
         {screen === "demo-report" && (
@@ -5869,6 +6053,7 @@ export default function App() {
         )}
         {screen === "file-box" && <FileBoxScreen onBack={() => setScreen("setup")} />}
         {screen === "teacher-guide" && <TeacherGuideScreen onBack={() => setScreen("setup")} />}
+        {screen === "build-your-own" && <BuildYourOwnScreen onBack={() => setScreen("setup")} />}
         {screen === "passage" && (
           <PassageScreen
             passage={passage}
