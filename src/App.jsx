@@ -1929,7 +1929,7 @@ function SetupScreen({ onBegin, customPassages, onSaveCustomPassage, onViewDemoR
       )}
 
       {step === 2 && (
-        <div className="step-in relative z-10 max-h-full overflow-y-auto">
+        <div className="step-in relative z-10 max-h-full overflow-y-auto pb-3">
           <h1 className="font-display font-800 text-xl text-stone-700 block mb-3 text-center bg-white/70 rounded-xl py-1.5">Build your explorer</h1>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
