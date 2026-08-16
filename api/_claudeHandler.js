@@ -43,7 +43,32 @@ const MAX_TOKENS_CAP = 1000;
 // a single call (see DAILY_QUOTA_PER_CODE in _shared.js for the other
 // numbers), and gated to only this one prompt (see isDiagnosticPrompt
 // below) so every other, lighter call keeps the tighter default cap.
-const DIAGNOSTIC_MAX_TOKENS_CAP = 1800;
+// Bumped from 1800 to 2400: the openai/gpt-oss-20b switch above brought
+// this model family's reasoning step with it (see REASONING_PARAMS below)
+// — reasoning tokens are drawn from this same max_tokens budget before
+// the model ever starts writing the actual JSON answer, so the diagnostic
+// prompt (the most demanding one) needs real headroom even with
+// reasoning effort turned down, not just the old llama-3.1 cap.
+const DIAGNOSTIC_MAX_TOKENS_CAP = 2400;
+// openai/gpt-oss-20b (and gpt-oss-120b) are reasoning models: by default
+// (reasoning_effort: "medium", undocumented but confirmed via Groq's own
+// docs at console.groq.com/docs/reasoning) they spend a meaningful chunk
+// of max_tokens on an internal reasoning pass before writing the final
+// answer — for a demanding prompt like the diagnostic report, that
+// reasoning pass alone could consume the entire token budget, leaving
+// `message.content` empty and every safeParseJSON attempt in App.jsx
+// failing with "Response wasn't valid JSON", consistently, every call.
+// "low" cuts that reasoning pass down substantially so the actual JSON
+// answer reliably gets written within the cap. include_reasoning: false
+// keeps any reasoning content out of the response entirely (Groq's
+// default already puts it in a separate `reasoning` field rather than
+// mixing it into `content`, but there are live community reports of
+// reasoning/gibberish leaking into `content` regardless — see
+// community.groq.com's gpt-oss-120b thread — so this is a deliberate
+// extra safety margin, not redundant). Both keys are harmless no-ops if
+// GROQ_MODEL is ever pointed at a non-reasoning model; Groq's API (like
+// OpenAI's) ignores parameters a given model doesn't understand.
+const REASONING_PARAMS = { reasoning_effort: "low", include_reasoning: false };
 const MAX_MESSAGES = 40;
 const MAX_MESSAGE_CHARS = 8000;
 const MAX_SYSTEM_CHARS = 12000;
@@ -308,6 +333,7 @@ export default async function claudeHandler(req, res) {
           req.body.max_tokens || MAX_TOKENS_CAP,
           isDiagnosticPrompt(req.body.system) ? DIAGNOSTIC_MAX_TOKENS_CAP : MAX_TOKENS_CAP
         ),
+        ...REASONING_PARAMS,
       }),
     });
 

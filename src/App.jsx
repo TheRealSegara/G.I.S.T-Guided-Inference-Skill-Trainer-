@@ -1131,6 +1131,13 @@ const RETRYABLE_429_WAIT_MS = 20_000;
 function safeParseJSON(raw) {
   let cleaned = raw.trim();
   cleaned = cleaned.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
+  // Groq's gpt-oss reasoning models are requested with include_reasoning:
+  // false (see api/_claudeHandler.js), which normally keeps reasoning out
+  // of this content entirely — but there are live community reports of a
+  // <think>...</think>-style reasoning block still leaking into content
+  // regardless of that setting. Strip it defensively before parsing;
+  // harmless no-op for every other response, which never contains this.
+  cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 
   // Attempt 1: parse as-is
   try {
