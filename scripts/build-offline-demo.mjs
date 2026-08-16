@@ -4,10 +4,11 @@
 // before the app boots. No Node, no npm install, no terminal, no server --
 // just double-click the output file and open it in a browser.
 //
-// This is a straight port of scripts/local-demo-server.mjs's mock logic
-// (same word content, same endpoint shapes) from Express route handlers to
-// a fetch() interceptor, since there's no server process here to route
-// requests through. Keep the two in sync if the mock logic changes.
+// The word content and coaching logic itself lives in
+// scripts/mock-backend-logic.mjs, shared with scripts/local-demo-server.mjs
+// (the Node/Express version) -- read in here as plain text and inlined
+// (its trailing `export {...}` statement stripped, since this runs as a
+// classic browser <script>, not an ES module) so the two never drift apart.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,9 +27,22 @@ if (!jsFile || !cssFile) {
 const appJs = fs.readFileSync(path.join(assetsDir, jsFile), "utf8");
 const appCss = fs.readFileSync(path.join(assetsDir, cssFile), "utf8");
 
+const mockLogicSource = fs.readFileSync(path.join(__dirname, "mock-backend-logic.mjs"), "utf8");
+// Strip the leading `export ` keywords are never used inline in that file
+// (only the trailing `export { ... };` block), so just cut everything from
+// that block onward.
+const exportIdx = mockLogicSource.indexOf("\nexport {");
+if (exportIdx === -1) {
+  console.error("Couldn't find the trailing export block in mock-backend-logic.mjs -- did its structure change?");
+  process.exit(1);
+}
+const mockLogicBody = mockLogicSource.slice(0, exportIdx);
+
 // ---------------------------------------------------------------------
 // Mock bootstrap script, as a plain string (this runs in the browser, not
-// in this Node build script) -- ported from scripts/local-demo-server.mjs.
+// in this Node build script): the shared mock logic (word content,
+// mockClaude()) plus a fetch()-interception harness that plays the role
+// Express route handlers play in scripts/local-demo-server.mjs.
 // ---------------------------------------------------------------------
 const mockScript = String.raw`
 (function () {
@@ -47,199 +61,7 @@ const mockScript = String.raw`
     } catch (e) { return null; }
   }
 
-  /* ---------------- Word content: the app's 4 real built-in passages ---------------- */
-  var WORDS = {
-    reluctant: { meaning: "Unwilling; hesitant", distractors: ["Very excited", "Completely confused", "Extremely brave"], hint: "Think about how the little brother acted before he saw the orang utan." },
-    enormous: { meaning: "Very big; huge", distractors: ["Very small", "Very fast", "Very colourful"], hint: "The passage compares its size to something else nearby." },
-    curious: { meaning: "Eager to know more", distractors: ["Feeling sleepy", "Feeling angry", "Feeling bored"], hint: "Think about why he kept asking questions." },
-    damp: { meaning: "Slightly wet", distractors: ["Very hot", "Completely dry", "Very cold"], hint: "The passage explains why the fur felt this way — it had just rained." },
-    gentle: { meaning: "Kind and calm", distractors: ["Loud and rough", "Fast and messy", "Shy and quiet"], hint: "The ranger contrasts how they look with how they actually behave." },
-    bustling: { meaning: "Busy and lively", distractors: ["Quiet and empty", "Slow and sleepy", "Dark and scary"], hint: "Think about the stalls and children running everywhere." },
-    delighted: { meaning: "Very pleased", distractors: ["Very worried", "Very confused", "Very tired"], hint: "Think about grandmother's big smile." },
-    fragrant: { meaning: "Smelling sweet", distractors: ["Tasting sour", "Feeling rough", "Sounding loud"], hint: "The passage describes the pandan leaves' smell." },
-    exhausted: { meaning: "Extremely tired", distractors: ["Extremely happy", "Extremely hungry", "Extremely proud"], hint: "Think about a full day of cooking and welcoming guests." },
-    generous: { meaning: "Willing to share freely", distractors: ["Unwilling to share", "Quick to argue", "Slow to answer"], hint: "Think about how the neighbours treat anyone who walks by." },
-    brave: { meaning: "Not afraid", distractors: ["Very shy", "Very silly", "Very sleepy"], hint: "Mei says spiders look scary, but are actually this." },
-    camouflage: { meaning: "Colouring that helps hide", distractors: ["A loud sound", "A fast movement", "A sweet smell"], hint: "Think about how a gecko can change color." },
-    timid: { meaning: "Shy and easily scared", distractors: ["Bold and loud", "Playful and silly", "Angry and mean"], hint: "Think about what the cat does when guests come." },
-    clever: { meaning: "Quick to learn and understand", distractors: ["Slow to learn", "Hard to see", "Easy to scare"], hint: "Think about how the dog can open doors by itself." },
-    playful: { meaning: "Full of fun", distractors: ["Full of worry", "Full of anger", "Full of silence"], hint: "Think about the rabbit jumping and running all day." },
-    invented: { meaning: "Created something new", distractors: ["Broke something old", "Found something lost", "Copied something else"], hint: "Think about what the scientist did to make the robot." },
-    powerful: { meaning: "Very strong", distractors: ["Very weak", "Very quiet", "Very slow"], hint: "Think about the robot lifting heavy boxes easily." },
-    careful: { meaning: "Paying close attention", distractors: ["Not paying attention", "Moving very fast", "Making a lot of noise"], hint: "Think about how the robot never drops anything." },
-    amazing: { meaning: "Causing great wonder", distractors: ["Causing boredom", "Causing confusion", "Causing worry"], hint: "Think about how everyone reacted to the robot dancing and singing." },
-    tiny: { meaning: "Very small", distractors: ["Very large", "Very loud", "Very old"], hint: "The passage compares the computer's size to your hand." }
-  };
-  var KNOWN_WORDS = Object.keys(WORDS);
-
-  var COMPREHENSION_BY_PASSAGE = [
-    { match: "Mei Ling", question: "Why was the little brother reluctant to walk into the forest at first?", options: ["He was scared and didn't want to go", "He was too tired to walk", "He didn't like his mother", "He wanted to go home"], correctAnswer: "He was scared and didn't want to go" },
-    { match: "Aiman's village", question: "Why does Aiman's village have a festival?", options: ["To celebrate the harvest", "To welcome new students", "To open a new market", "To say goodbye to summer"], correctAnswer: "To celebrate the harvest" },
-    { match: "Pet Show", question: "What is special about Ali's dog?", options: ["It can open doors by itself", "It can talk", "It can swim very fast", "It changes color"], correctAnswer: "It can open doors by itself" },
-    { match: "robot show", question: "What can the robot do besides lifting heavy boxes?", options: ["Dance and sing songs", "Cook food", "Fly in the sky", "Read books aloud"], correctAnswer: "Dance and sing songs" }
-  ];
-
-  function findLiteralWord(text) {
-    var m = /target word "([^"]+)"/.exec(text || "");
-    return m ? m[1].toLowerCase() : null;
-  }
-  function pickDistinct(arr, n, exclude) {
-    return arr.filter(function (w) { return w !== exclude; }).sort(function () { return Math.random() - 0.5; }).slice(0, n);
-  }
-  function extractPassageText(allMsgs) {
-    var m = /Passage: "([\s\S]*?)"\n\nStart coaching/.exec(allMsgs) ||
-      /Original passage: "([\s\S]*?)"\n\nTarget word/.exec(allMsgs) ||
-      /Passage: "([\s\S]*?)"/.exec(allMsgs);
-    return m ? m[1] : "";
-  }
-  function getSentenceContaining(text, word) {
-    var sentences = text.match(/[^.!?]+[.!?]+/g) || (text ? [text] : []);
-    var re = new RegExp("\\b" + word.replace(/[.*+?^\${}()|[\]\\]/g, "\\$&") + "\\b", "i");
-    for (var i = 0; i < sentences.length; i++) if (re.test(sentences[i])) return sentences[i];
-    return text;
-  }
-  var STOPWORDS = {};
-  ["about", "after", "again", "their", "there", "these", "those", "which", "while", "would", "could", "should", "because", "before", "between", "through", "though", "where", "when", "what", "were", "being", "doing", "having", "other", "really", "still", "every", "never", "always", "something", "someone", "anything", "around", "across", "toward", "towards", "during", "without", "within", "under", "above", "below", "first", "second", "third", "little", "great", "large", "quite"].forEach(function (w) { STOPWORDS[w] = true; });
-  function extractRealWords(text) {
-    var seen = {}, out = [];
-    var matches = text.match(/[A-Za-z]{5,}/g) || [];
-    for (var i = 0; i < matches.length; i++) {
-      var w = matches[i].toLowerCase();
-      if (STOPWORDS[w] || seen[w]) continue;
-      seen[w] = true;
-      out.push(w);
-    }
-    return out;
-  }
-
-  function mockClaude(system, messages) {
-    var allMsgs = (messages || []).map(function (m) { return m.content; }).join("\n");
-    var lastMsg = (messages && messages[messages.length - 1] && messages[messages.length - 1].content) || "";
-
-    if (system.indexOf("You are the G.I.S.T. diagnostic engine") === 0) {
-      var logMatch = /Log \(chronological, oldest first\):\n(\[[\s\S]*?\])\n\nWhole-passage/.exec(allMsgs);
-      var log = [];
-      try { log = logMatch ? JSON.parse(logMatch[1]) : []; } catch (e) { log = []; }
-      var solved = log.filter(function (e) { return !e.skipped; });
-      var struggled = solved.filter(function (e) { return (e.hintsUsed || 0) > 0 || (e.finalStage || 0) >= 4; });
-      var easy = solved.filter(function (e) { return (e.hintsUsed || 0) === 0 && (e.finalStage || 0) < 4; });
-      var compSplit = allMsgs.split("Whole-passage comprehension check:")[1] || "";
-      var compMatch = /"correct":\s*(true|false|null)/.exec(compSplit);
-      var compCorrect = compMatch ? compMatch[1] : "null";
-      return {
-        summary: struggled.length
-          ? "Solid grasp of most words; " + struggled.length + " needed extra support and should be revisited."
-          : "Strong session — every word resolved independently with no real struggle.",
-        corePattern:
-          "**" + easy.length + " of " + solved.length + " words resolved quickly and independently.**\n\n" +
-          (easy.length ? "- " + easy.map(function (e) { return '"' + e.word + '"'; }).join(", ") + " resolved with no hints needed.\n" : "") +
-          (struggled.length ? "- " + struggled.map(function (e) { return '"' + e.word + '"'; }).join(", ") + " needed more support — worth a quick revisit.\n" : "") +
-          "- " + log.filter(function (e) { return e.skipped; }).length + " word(s) skipped this session.",
-        howReliable:
-          "**Answers were generally well-paced.**\n\n- " + log.filter(function (e) { return e.answeredAtFloor; }).length + " answer(s) landed right at the pacing floor, a possible guess.\n- " + (log.length - log.filter(function (e) { return e.answeredAtFloor; }).length) + " answer(s) took a realistic reading time.",
-        storyUnderstandingNote:
-          compCorrect === "true" ? "Passed the whole-passage comprehension check on the first try." :
-          compCorrect === "false" ? "Missed the whole-passage comprehension check — worth checking they followed the story, not just the words." :
-          "No comprehension check ran this session.",
-        whatToTry:
-          struggled.length
-            ? "**Revisit " + struggled.map(function (e) { return '"' + e.word + '"'; }).join(", ") + " in a new sentence next lesson.**\n\n- Ask the student to use it out loud before writing it down.\n- Pair it with a concrete example from their own life."
-            : "**Keep going at this pace — try a slightly harder passage next.**\n\n- This student is ready for less scaffolding."
-      };
-    }
-
-    if (system.indexOf("A Malaysian primary school ESL student just worked out a vocabulary word") === 0) {
-      var word = findLiteralWord(allMsgs) || KNOWN_WORDS[Math.floor(Math.random() * KNOWN_WORDS.length)];
-      var w = WORDS[word] || WORDS[KNOWN_WORDS[Math.floor(Math.random() * KNOWN_WORDS.length)]];
-      var distractors = pickDistinct(w.distractors, 3, null);
-      var options = [w.meaning].concat(distractors).sort(function () { return Math.random() - 0.5; });
-      return {
-        sentence: 'Even in a totally different situation, everyone agreed the word "' + word + '" fit perfectly here too.',
-        options: options,
-        correctAnswer: w.meaning
-      };
-    }
-
-    if (system.indexOf("A Malaysian primary school ESL student just finished working through 5 vocabulary words") === 0) {
-      var found = null;
-      for (var ci = 0; ci < COMPREHENSION_BY_PASSAGE.length; ci++) {
-        if (allMsgs.indexOf(COMPREHENSION_BY_PASSAGE[ci].match) !== -1) { found = COMPREHENSION_BY_PASSAGE[ci]; break; }
-      }
-      found = found || COMPREHENSION_BY_PASSAGE[0];
-      return { question: found.question, options: found.options, correctAnswer: found.correctAnswer };
-    }
-
-    if (system.indexOf("You help a teacher fix one word in a G.I.S.T. map") === 0) {
-      var passageText1 = extractPassageText(allMsgs) || allMsgs;
-      var alreadyChosenMatch = /Already chosen words \(don't repeat these\): (.*)/.exec(allMsgs);
-      var alreadyChosen = {};
-      (alreadyChosenMatch ? alreadyChosenMatch[1].split(",") : []).forEach(function (w2) { alreadyChosen[w2.trim().toLowerCase()] = true; });
-      var realWords1 = extractRealWords(passageText1).filter(function (w2) { return !alreadyChosen[w2]; });
-      var knownInPassage1 = realWords1.filter(function (w2) { return KNOWN_WORDS.indexOf(w2) !== -1; });
-      var pickedWord = knownInPassage1[0] || realWords1[0] || KNOWN_WORDS[Math.floor(Math.random() * KNOWN_WORDS.length)];
-      return { word: pickedWord, clueType: "inference", concreteness: "abstract" };
-    }
-
-    if (system.indexOf("You help a teacher turn their own reading passage") === 0) {
-      var passageText2 = extractPassageText(allMsgs) || allMsgs;
-      var realWords2 = extractRealWords(passageText2);
-      var realWordSet = {};
-      realWords2.forEach(function (w2) { realWordSet[w2] = true; });
-      var knownInPassage2 = KNOWN_WORDS.filter(function (w2) { return realWordSet[w2]; });
-      var otherRealWords = realWords2.filter(function (w2) { return KNOWN_WORDS.indexOf(w2) === -1; });
-      var chosen = pickDistinct(knownInPassage2, 5, null);
-      if (chosen.length < 5) chosen = chosen.concat(pickDistinct(otherRealWords, 5 - chosen.length, null));
-      if (chosen.length < 5) chosen = chosen.concat(pickDistinct(KNOWN_WORDS, 5 - chosen.length, null));
-      var picks = chosen.slice(0, 5).map(function (w2) { return { word: w2, clueType: "inference", concreteness: "abstract" }; });
-      return {
-        emoji: "📘",
-        mission: "A new adventure awaits! Learn these 5 words to complete the story.",
-        arrival: "You did it! Every word learned, story complete.",
-        readabilityLevel: "about_right",
-        readabilityNote: "Sentence length and vocabulary look appropriate for Year 4-6 ESL learners.",
-        words: picks
-      };
-    }
-
-    if (system.indexOf("Help a Malaysian primary school ESL student (age 9-12) work out ONE target vocabulary word") !== -1) {
-      var word2 = findLiteralWord(allMsgs) || KNOWN_WORDS[Math.floor(Math.random() * KNOWN_WORDS.length)];
-      var w2 = WORDS[word2];
-      var isFirstTurn = messages.length <= 1;
-      var wasCorrect = /\[FACT: this answer is CORRECT\./.test(lastMsg);
-
-      if (!w2) {
-        var passageText3 = extractPassageText(allMsgs);
-        var sentence = getSentenceContaining(passageText3, word2);
-        sentence = sentence ? sentence.trim() : "";
-        if (!sentence) sentence = 'The passage uses "' + word2 + '" somewhere in the story.';
-        var missingWordFact = /\[FACT: the answer does not contain the target word/.test(lastMsg);
-        if (isFirstTurn) {
-          return { message: "Let's work out what \"" + word2 + "\" means. Read this part carefully, then explain what you think it means in your own words.", display_sentence: sentence, input_type: "text", options: null, word_tiles: null, correct_answer: null, sentence_starter: null, stage: 1, grading_reasoning: null, hint_given: false, resolved: false, fun_fact: null };
-        }
-        if (missingWordFact) {
-          return { message: 'Good try! Can you use the actual word "' + word2 + '" somewhere in your explanation this time?', display_sentence: sentence, input_type: "text", options: null, word_tiles: null, correct_answer: null, sentence_starter: null, stage: 1, grading_reasoning: null, hint_given: true, resolved: false, fun_fact: null };
-        }
-        return { message: "Nice thinking! That's a fair way to describe \"" + word2 + "\" based on how it's used here.", display_sentence: sentence, input_type: "text", options: null, word_tiles: null, correct_answer: null, sentence_starter: null, stage: 2, grading_reasoning: null, hint_given: false, resolved: true, fun_fact: null };
-      }
-
-      if (isFirstTurn) {
-        var distractors2 = pickDistinct(w2.distractors, 3, null);
-        var options2 = [w2.meaning].concat(distractors2).sort(function () { return Math.random() - 0.5; });
-        return { message: "Let's figure out what \"" + word2 + "\" means here! Pick the best answer.", display_sentence: "The passage uses \"" + word2 + "\" — read the sentence carefully.", input_type: "mcq", options: options2, word_tiles: null, correct_answer: w2.meaning, sentence_starter: null, stage: 1, grading_reasoning: null, hint_given: false, resolved: false, fun_fact: null };
-      }
-
-      if (wasCorrect) {
-        var neededHint = /Not quite!/.test(allMsgs);
-        return { message: "Nice work, you've got it! \"" + word2 + "\" really does mean " + w2.meaning.toLowerCase() + ".", display_sentence: "The passage uses \"" + word2 + "\" — read the sentence carefully.", input_type: "mcq", options: [w2.meaning].concat(pickDistinct(w2.distractors, 3, null)), word_tiles: null, correct_answer: w2.meaning, sentence_starter: null, stage: neededHint ? 2 : 1, grading_reasoning: null, hint_given: false, resolved: true, fun_fact: "Great context-clue reading!" };
-      }
-
-      var distractors3 = pickDistinct(w2.distractors, 3, null);
-      var options3 = [w2.meaning].concat(distractors3).sort(function () { return Math.random() - 0.5; });
-      return { message: "Not quite! " + w2.hint, display_sentence: 'The passage uses "' + word2 + '" — read the sentence carefully.', input_type: "mcq", options: options3, word_tiles: null, correct_answer: w2.meaning, sentence_starter: null, stage: 1, grading_reasoning: null, hint_given: true, resolved: false, fun_fact: null };
-    }
-
-    return { message: "OK", display_sentence: "OK", input_type: "text", options: null, word_tiles: null, correct_answer: null, sentence_starter: null, stage: 1, hint_given: false, resolved: true, fun_fact: null };
-  }
+` + mockLogicBody + `
 
   /* ---------------- in-memory "database" (resets on page reload) ---------------- */
   var nextStudentId = 1, nextSessionId = 1;
